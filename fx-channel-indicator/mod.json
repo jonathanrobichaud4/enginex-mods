@@ -1,0 +1,17 @@
+{
+  "id": "fx-channel-indicator",
+  "name": "FX Channel Indicator",
+  "version": "2.2.0",
+  "author": "Jonathan Robichaud",
+  "category": "ui",
+  "description": "Shows which mixer channel the FX unit is on (CH 1-4 or MASTER) next to the effect name, blinks that channel's headphone CUE LED, and adds an optional band mode for the FX frequency control (tap LOW / MID / HIGH to combine bands, ALL, or step through LOW, LOW+MID, ALL, MID+HIGH, HIGH with the FX knob) (Settings > Fx > FX Frequency). On EngineX 5.3.0.4 it also adds Reverse Left / Right Jog Wheel (Settings > Fx), using EngineX 5.3.0.5's own jog code; on 5.3.0.5 EngineX's built-in switches are used instead. Built for SC LIVE 4.",
+  "qmlFiles": {
+    "DJFx.qml": "Skins/Embedded/Views/MainView/Fx/DJFx.qml",
+    "FxTabContent.qml": "Skins/Embedded/Views/ControlCenter/Tabs/Preferences/FxTabContent.qml",
+    "MixerChannelCore.qml": "ControlSurfaceModules/ControlSurfaceModules/MixerChannelCore.qml",
+    "FxParameters.qml": "Skins/Embedded/Views/MainView/Fx/FxParameters.qml",
+    "SteppedTimeKnobOutput.qml": "ControlSurfaceModules/ControlSurfaceModules/private/SteppedTimeKnobOutput.qml",
+    "JogWheel.qml": "ControlSurfaceModules/ControlSurfaceModules/JogWheel.qml",
+    "GlobalAssignmentConfig.qml": "ControlSurfaceModules/ControlSurfaceModules/GlobalAssignmentConfig.qml"
+  }
+}

@@ -1,0 +1,171 @@
+--- a/Skins/Embedded/Views/ControlCenter/Tabs/Preferences/FxTabContent.qml
++++ b/Skins/Embedded/Views/ControlCenter/Tabs/Preferences/FxTabContent.qml
+@@ -1,7 +1,167 @@
+ import QtQuick 2.12
++import Planck 1.0
+ import "Entries"
++import "Entries/Base" as EntryBase
+ import "Base"
+ 
++// Stock Engine 5.3.0 Settings > Fx tab, plus the fx-channel-indicator mod's
++// "FX Frequency" entry (frequency slider or LOW / MID / HIGH / ALL preset buttons in the FX bar).
+ FlickableTabContent {
+-    content: [MainFxSettings {}, SweepFxSettings {}, TransitionFxSection {}, GeneralFxSettings {}]
++    id: scFxTab
++
++    // Same shared store as DJFx.qml: one Settings object kept on the JS Math
++    // global (EngineX shares Math.scI18n the same way), so this toggle and the
++    // FX bar always see the same live value.
++    function scFxFreqStore() {
++        if (!Math.scFxFreqStore) {
++            try {
++                Math.scFxFreqStore = Qt.createQmlObject(
++                    'import QtCore; Settings { location: "file:///data/enginex/ui/mod-fx-channel-indicator.ini"; category: "fxFrequency"; property bool simple: false; property string frequencyLabel: "" }',
++                    root, "fxChannelIndicatorStore")
++            } catch (e) {
++                console.warn("fx-channel-indicator: settings file unavailable, frequency mode will not persist:", e)
++                Math.scFxFreqStore = Qt.createQmlObject(
++                    'import QtQml; QtObject { property bool simple: false; property string frequencyLabel: "" }', root, "fxChannelIndicatorStoreFallback")
++            }
++        }
++        return Math.scFxFreqStore
++    }
++    readonly property var scFreqStore: scFxFreqStore()
++    // Publish the mode as a Planck property (/GUI/Scripted/EngineXModFxPresets).
++    // Engine's controller code runs in a separate QML engine, but Planck
++    // properties are shared, so the FX knob handler reads it from there (the same
++    // way EngineX 5.3.0.5 passes its Reverse Jog Wheel switches to the jog code).
++    function scPublishFreqMode(simple) {
++        try {
++            if (!Math.scFxPresetsPropMade) {
++                Planck.createProperty("EngineXModFxPresets", false, 1)
++                Math.scFxPresetsPropMade = true
++            }
++            const p = Planck.getProperty("/GUI/Scripted/EngineXModFxPresets")
++            if (p && p.translator) p.translator.state = !!simple
++        } catch (e) {
++            console.warn("fx-channel-indicator: cannot publish FX frequency mode:", e)
++        }
++    }
++
++
++    // fx-channel-indicator mod: Reverse Left / Right Jog Wheel for EngineX 5.3.0.4,
++    // the same switches EngineX 5.3.0.5 has built in (and the same Planck
++    // properties its jog code reads). With EngineX's own switches present
++    // (5.3.0.5: root.scReverseJogLeft exists) this does nothing, so the two never
++    // fight. Shared through the JS Math global like the frequency store.
++    function scJog() {
++        if (Math.scJog) return Math.scJog
++        const jog = {
++            left: false, right: false, loaded: false, made: false, store: null,
++            native: function() {
++                try { return typeof root !== "undefined" && root && root.scReverseJogLeft !== undefined } catch (e) { return false }
++            },
++            settings: function() {
++                if (!jog.store) {
++                    try {
++                        jog.store = Qt.createQmlObject('import QtCore; Settings { location: "file:///data/enginex/ui/mod-fx-channel-indicator.ini"; category: "fxFrequency" }', root, "fxChannelIndicatorJogStore")
++                    } catch (e) {
++                        console.warn("fx-channel-indicator: settings file unavailable, jog reverse will not persist:", e)
++                    }
++                }
++                return jog.store
++            },
++            load: function() {
++                if (jog.loaded) return
++                jog.loaded = true
++                const s = jog.settings()
++                if (!s) return
++                const t = v => v === true || v === "true" || v === 1 || v === "1"
++                try {
++                    jog.left = t(s.value("jogReverseLeft", false))
++                    jog.right = t(s.value("jogReverseRight", false))
++                } catch (e) {}
++            },
++            publish: function() {
++                if (jog.native()) return false
++                jog.load()
++                try {
++                    if (!jog.made) {
++                        Planck.createProperty("EngineXJogInvertLeft", false, 1)
++                        Planck.createProperty("EngineXJogInvertRight", false, 1)
++                        Planck.createProperty("EngineXJogInvertReady", false, 1)
++                        jog.made = true
++                    }
++                    const pL = Planck.getProperty("/GUI/Scripted/EngineXJogInvertLeft")
++                    const pR = Planck.getProperty("/GUI/Scripted/EngineXJogInvertRight")
++                    const pReady = Planck.getProperty("/GUI/Scripted/EngineXJogInvertReady")
++                    if (!(pL && pL.translator && pR && pR.translator && pReady && pReady.translator)) return false
++                    pL.translator.state = jog.left
++                    pR.translator.state = jog.right
++                    pReady.translator.state = true
++                    return true
++                } catch (e) {
++                    console.warn("fx-channel-indicator: cannot publish jog reverse:", e)
++                    return false
++                }
++            },
++            set: function(side, on) {
++                jog.load()
++                if (side === "Right") jog.right = on
++                else jog.left = on
++                const s = jog.settings()
++                if (s) {
++                    try {
++                        s.setValue(side === "Right" ? "jogReverseRight" : "jogReverseLeft", on)
++                        s.sync()
++                    } catch (e) {}
++                }
++                jog.publish()
++            }
++        }
++        Math.scJog = jog
++        return jog
++    }
++    readonly property var scJogState: scJog()
++    property bool scJogLeft: scJogState.left
++    property bool scJogRight: scJogState.right
++    Component.onCompleted: { scJogState.load(); scJogLeft = scJogState.left; scJogRight = scJogState.right }
++
++    content: [
++        MainFxSettings {},
++        EntryBase.ListEntry {
++            objectName: "FxFrequencyMode"
++            text: (Math.scI18n ? Math.scI18n.t("FX Frequency") : "FX Frequency")
++            visible: Config.audio.fx.sendEffectSlots === 0
++            values: ["Slider", "Presets"]
++            currentValue: scFxTab.scFreqStore && scFxTab.scFreqStore.simple ? "Presets" : "Slider"
++            onSelected: function(index) {
++                const store = scFxTab.scFreqStore
++                if (!store) return
++                store.simple = index === 1
++                scFxTab.scPublishFreqMode(index === 1)
++                if (typeof store.setValue === "function") {
++                    try {
++                        store.setValue("simple", index === 1) // write now, for the knob handler
++                        store.sync()
++                    } catch (e) {}
++                }
++            }
++        },
++        EntryBase.ListEntry {
++            objectName: "FxModJogReverseLeft"
++            text: (Math.scI18n ? Math.scI18n.t("Reverse Left Jog Wheel") : "Reverse Left Jog Wheel")
++            visible: !scFxTab.scJogState.native()
++            values: ["Off", "On"]
++            currentValue: values[scFxTab.scJogLeft ? 1 : 0]
++            onSelected: function(index) { scFxTab.scJogState.set("Left", index === 1); scFxTab.scJogLeft = index === 1 }
++        },
++        EntryBase.ListEntry {
++            objectName: "FxModJogReverseRight"
++            text: (Math.scI18n ? Math.scI18n.t("Reverse Right Jog Wheel") : "Reverse Right Jog Wheel")
++            visible: !scFxTab.scJogState.native()
++            values: ["Off", "On"]
++            currentValue: values[scFxTab.scJogRight ? 1 : 0]
++            onSelected: function(index) { scFxTab.scJogState.set("Right", index === 1); scFxTab.scJogRight = index === 1 }
++        },
++        SweepFxSettings {},
++        TransitionFxSection {},
++        GeneralFxSettings {}
++    ]
+ }

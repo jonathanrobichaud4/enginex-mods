@@ -1,0 +1,403 @@
+--- a/Skins/Embedded/Views/MainView/Fx/FxParameters.qml
++++ b/Skins/Embedded/Views/MainView/Fx/FxParameters.qml
+@@ -16,6 +16,134 @@
+ 
+     property bool focused: false
+ 
++    // fx-channel-indicator mod: "FX Frequency" mode (Settings > Fx). One shared
++    // Settings object kept on the JS Math global (EngineX shares Math.scI18n the
++    // same way), so the Settings toggle and every FX bar see the same live value.
++    function scFxFreqStore() {
++        if (!Math.scFxFreqStore) {
++            try {
++                Math.scFxFreqStore = Qt.createQmlObject(
++                    'import QtCore; Settings { location: "file:///data/enginex/ui/mod-fx-channel-indicator.ini"; category: "fxFrequency"; property bool simple: false; property string frequencyLabel: "" }',
++                    root, "fxChannelIndicatorStore")
++            } catch (e) {
++                console.warn("fx-channel-indicator: settings file unavailable, frequency mode will not persist:", e)
++                Math.scFxFreqStore = Qt.createQmlObject(
++                    'import QtQml; QtObject { property bool simple: false; property string frequencyLabel: "" }', root, "fxChannelIndicatorStoreFallback")
++            }
++        }
++        return Math.scFxFreqStore
++    }
++    readonly property var scFreqStore: scFxFreqStore()
++    readonly property bool scFreqSimple: scFreqStore ? scFreqStore.simple : false
++    // Publish the mode as a Planck property (/GUI/Scripted/EngineXModFxPresets).
++    // Engine's controller code runs in a separate QML engine, but Planck
++    // properties are shared, so the FX knob handler reads it from there (the same
++    // way EngineX 5.3.0.5 passes its Reverse Jog Wheel switches to the jog code).
++    function scPublishFreqMode(simple) {
++        try {
++            if (!Math.scFxPresetsPropMade) {
++                Planck.createProperty("EngineXModFxPresets", false, 1)
++                Math.scFxPresetsPropMade = true
++            }
++            const p = Planck.getProperty("/GUI/Scripted/EngineXModFxPresets")
++            if (p && p.translator) p.translator.state = !!simple
++        } catch (e) {
++            console.warn("fx-channel-indicator: cannot publish FX frequency mode:", e)
++        }
++    }
++    onScFreqSimpleChanged: scPublishFreqMode(scFreqSimple)
++
++    // fx-channel-indicator mod: Reverse Left / Right Jog Wheel for EngineX 5.3.0.4,
++    // the same switches EngineX 5.3.0.5 has built in (and the same Planck
++    // properties its jog code reads). With EngineX's own switches present
++    // (5.3.0.5: root.scReverseJogLeft exists) this does nothing, so the two never
++    // fight. Shared through the JS Math global like the frequency store.
++    function scJog() {
++        if (Math.scJog) return Math.scJog
++        const jog = {
++            left: false, right: false, loaded: false, made: false, store: null,
++            native: function() {
++                try { return typeof root !== "undefined" && root && root.scReverseJogLeft !== undefined } catch (e) { return false }
++            },
++            settings: function() {
++                if (!jog.store) {
++                    try {
++                        jog.store = Qt.createQmlObject('import QtCore; Settings { location: "file:///data/enginex/ui/mod-fx-channel-indicator.ini"; category: "fxFrequency" }', root, "fxChannelIndicatorJogStore")
++                    } catch (e) {
++                        console.warn("fx-channel-indicator: settings file unavailable, jog reverse will not persist:", e)
++                    }
++                }
++                return jog.store
++            },
++            load: function() {
++                if (jog.loaded) return
++                jog.loaded = true
++                const s = jog.settings()
++                if (!s) return
++                const t = v => v === true || v === "true" || v === 1 || v === "1"
++                try {
++                    jog.left = t(s.value("jogReverseLeft", false))
++                    jog.right = t(s.value("jogReverseRight", false))
++                } catch (e) {}
++            },
++            publish: function() {
++                if (jog.native()) return false
++                jog.load()
++                try {
++                    if (!jog.made) {
++                        Planck.createProperty("EngineXJogInvertLeft", false, 1)
++                        Planck.createProperty("EngineXJogInvertRight", false, 1)
++                        Planck.createProperty("EngineXJogInvertReady", false, 1)
++                        jog.made = true
++                    }
++                    const pL = Planck.getProperty("/GUI/Scripted/EngineXJogInvertLeft")
++                    const pR = Planck.getProperty("/GUI/Scripted/EngineXJogInvertRight")
++                    const pReady = Planck.getProperty("/GUI/Scripted/EngineXJogInvertReady")
++                    if (!(pL && pL.translator && pR && pR.translator && pReady && pReady.translator)) return false
++                    pL.translator.state = jog.left
++                    pR.translator.state = jog.right
++                    pReady.translator.state = true
++                    return true
++                } catch (e) {
++                    console.warn("fx-channel-indicator: cannot publish jog reverse:", e)
++                    return false
++                }
++            },
++            set: function(side, on) {
++                jog.load()
++                if (side === "Right") jog.right = on
++                else jog.left = on
++                const s = jog.settings()
++                if (s) {
++                    try {
++                        s.setValue(side === "Right" ? "jogReverseRight" : "jogReverseLeft", on)
++                        s.sync()
++                    } catch (e) {}
++                }
++                jog.publish()
++            }
++        }
++        Math.scJog = jog
++        return jog
++    }
++    function scJogStartup() {
++        const jog = scJog()
++        if (jog.native() || Math.scJogStarted) return
++        Math.scJogStarted = true
++        let tries = 0
++        const retry = () => {
++            if (jog.publish() || ++tries >= 30) return
++            const t = Qt.createQmlObject('import QtQuick; Timer { interval: 500 }', root, "fxChannelIndicatorJogRetry")
++            t.triggered.connect(() => { t.destroy(); retry() })
++            t.start()
++        }
++        retry()
++    }
++    Component.onCompleted: {
++        scPublishFreqMode(scFreqSimple)
++        scJogStartup()
++    }
++
+     Component {
+         id: progressParameter
+ 
+@@ -74,6 +202,256 @@
+         }
+     }
+ 
++    // fx-channel-indicator mod: Low / Mid / High in place of the Frequency slider.
++    // It lives inside Engine's own parameter row, so Engine creates and destroys
++    // it with the effect, exactly like the stock slider (the 1.2/1.3 approach of
++    // re-building the parameter list crashed on effect changes).
++    Component {
++        id: frequencyPresetsParameter
++
++        ColumnLayout {
++            id: presets
++            objectName: `DJFx${fxParameters.indicator}_Frequency_Presets`
++            spacing: 4
++
++            property EmbeddedDJFxParameterInterface parameter: param
++            property bool alive: true
++
++            // Band combinations (2.2.0). Engine's frequency control is one slider:
++            // below the centre the effect covers the lows up to a cutoff, above it
++            // the highs down to a cutoff, at the centre everything. So a selection
++            // must be one run of neighbouring bands that touches an end (or all
++            // three); LOW + HIGH without MID, or MID on its own, can't be made.
++            // Positions from the table Engine's own frequency readout uses:
++            //   LOW         "< 256 Hz"   lows only
++            //   LOW + MID   "< 2.6 kHz"  everything but the top end
++            //   ALL         centre       all bands
++            //   MID + HIGH  "> 256 Hz"   everything but the bass
++            //   HIGH        "> 2.6 kHz"  top end only
++            // Knob order is slider order (left to right). Must match SteppedTimeKnobOutput.qml.
++            readonly property var positions: [15 / 124, 40 / 124, 0.5, 78 / 124, 103 / 124]
++            readonly property var bands: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [0, 1, 1], [0, 0, 1]]
++            readonly property var labels: ["LOW", "MID", "HIGH", "ALL"] // the buttons
++            readonly property int allState: 2
++
++            // The combination with these bands on, or -1 when it can't be made.
++            function stateFor(on) {
++                for (let s = 0; s < bands.length; ++s)
++                    if (bands[s][0] === on[0] && bands[s][1] === on[1] && bands[s][2] === on[2]) return s
++                return -1
++            }
++            // Button i lit: a band of the current combination, or ALL for all three.
++            function buttonOn(i) {
++                if (parameter === null) return false
++                const s = onPreset(positionNow())
++                if (s === -1) return false
++                return i === 3 ? s === allState : bands[s][i] === 1
++            }
++            // Tap: ALL selects all bands. A band button adds that band, filling in
++            // MID when LOW and HIGH would otherwise be apart, or takes it away again.
++            // A tap that would leave nothing, or a gap (MID out of ALL), changes nothing.
++            function tapButton(i) {
++                if (i === 3) { write(allState, true); return }
++                const s = onPreset(positionNow())
++                const on = s === -1 ? [0, 0, 0] : bands[s].slice()
++                if (on[i]) {
++                    on[i] = 0
++                } else {
++                    on[i] = 1
++                    if (on[0] && on[2]) on[1] = 1
++                }
++                const next = stateFor(on)
++                if (next !== -1 && next !== s) write(next, true)
++            }
++
++            function valueFor(position) {
++                const start = parameter ? parameter.rangeStart : 0.0
++                const end = parameter ? parameter.rangeEnd : 1.0
++                return start + position * (end - start)
++            }
++            function positionNow() {
++                if (!parameter) return -1
++                const span = (parameter.rangeEnd - parameter.rangeStart) || 1.0
++                return (parameter.value - parameter.rangeStart) / span
++            }
++            // Index of the preset the frequency sits on (within half a grid step), or -1.
++            function presetAt(pos) {
++                for (let i = 0; i < positions.length; ++i)
++                    if (Math.abs(pos - positions[i]) < 0.5 / 124) return i
++                return -1
++            }
++            // Like presetAt, but also accepts the exact value Engine stored after our
++            // last write (in case it rounds presets onto a different grid).
++            function onPreset(pos) {
++                const i = presetAt(pos)
++                if (i !== -1) return i
++                if (target !== -1 && Math.abs(pos - echoPos) < 1e-6) return target
++                return -1
++            }
++            function nearest(pos) {
++                let near = 0
++                for (let i = 1; i < positions.length; ++i)
++                    if (Math.abs(pos - positions[i]) < Math.abs(pos - positions[near])) near = i
++                return near
++            }
++            function isSelected(i) {
++                return parameter !== null && onPreset(positionNow()) === i
++            }
++
++            // One FX bar on screen is the writer; the others only follow along.
++            function isWriter() {
++                if (!Math.scFreqWriter || !Math.scFreqWriter.alive) Math.scFreqWriter = presets
++                return Math.scFreqWriter === presets
++            }
++            // Taps always write (they only happen on one bar); knob steps are written
++            // by the writer bar only, so a click is never applied twice.
++            function write(i, fromTap) {
++                const p = parameter
++                if (!alive || !p) return
++                target = i
++                if (!fromTap && !isWriter()) return
++                const v = valueFor(positions[i])
++                // Tell every FX bar showing this parameter, so none of them mistakes
++                // the echo of this write for a knob move.
++                for (const bar of (Math.scFreqBars || [presets])) {
++                    if (!bar.alive || bar.parameter !== p) continue
++                    bar.target = i
++                    bar.writtenPos = positions[i]
++                    bar.awaitingEcho = true
++                    bar.restartEchoTimer()
++                }
++                Qt.callLater(() => {
++                    if (presets.alive && presets.parameter === p) p.value = v
++                })
++            }
++
++            // Knob handling in the FX bar. The stepped-knob handler in the controller
++            // part of the mod jumps presets before the filter moves; any knob it
++            // doesn't handle (e.g. a continuous/jog-style FX knob) moves the filter
++            // directly, and this catches it:
++            // - any move off a preset snaps to a preset, whatever its size;
++            // - at most one preset step per 120 ms, counted from the last preset
++            //   chosen; extra events in between just snap back to that preset, so it
++            //   never runs ahead and stops dead at LOW and ALL;
++            // - the value Engine stores after our write counts as "on the preset".
++            property int target: -1
++            property real landed: -1 // set once in onCompleted; not a binding
++            property real echoPos: -1
++            property bool awaitingEcho: false
++            property real writtenPos: -1
++            property double lastStep: 0
++            Timer {
++                id: echoTimer
++                interval: 300
++                onTriggered: presets.awaitingEcho = false
++            }
++            function restartEchoTimer() {
++                echoTimer.restart()
++            }
++            Component.onCompleted: {
++                Math.scFreqBars = (Math.scFreqBars || []).filter(bar => bar.alive).concat([presets])
++                landed = positionNow()
++                target = presetAt(landed)
++                isWriter()
++                if (parameter && parameter.label && fxParameters.scFreqStore)
++                    fxParameters.scFreqStore.frequencyLabel = parameter.label
++            }
++            Component.onDestruction: {
++                alive = false
++                if (Math.scFreqWriter === presets) Math.scFreqWriter = null
++                if (Math.scFreqBars) Math.scFreqBars = Math.scFreqBars.filter(bar => bar !== presets && bar.alive)
++            }
++            readonly property real valueNow: parameter && parameter.value !== undefined ? parameter.value : -1
++            onValueNowChanged: {
++                if (!alive || !parameter) return
++                const pos = positionNow()
++                const previous = landed
++                landed = pos
++                if (awaitingEcho && Math.abs(pos - writtenPos) < 2 / 124) {
++                    awaitingEcho = false
++                    echoPos = pos
++                    return
++                }
++                const on = onPreset(pos)
++                if (on !== -1) {
++                    target = on // a tap, the controller, or an effect default
++                    return
++                }
++                if (!isWriter()) return
++                const dir = pos > previous ? 1 : (pos < previous ? -1 : 0)
++                if (target === -1) {
++                    write(nearest(pos))
++                    return
++                }
++                const now = Date.now()
++                if (dir !== 0 && now - lastStep >= 120) {
++                    lastStep = now
++                    write(Math.max(0, Math.min(positions.length - 1, target + dir)))
++                } else {
++                    write(target)
++                }
++            }
++
++            LabelWithLED {
++                parameter: presets.parameter
++            }
++
++            Row {
++                Layout.fillHeight: true
++                spacing: 6
++
++                Repeater {
++                    model: presets.labels.length
++
++                    Rectangle {
++                        objectName: `DJFx${fxParameters.indicator}_Frequency_${presets.labels[index]}`
++                        readonly property bool selected: presets.parameter !== null &&
++                            presets.parameter.value !== undefined && presets.buttonOn(index)
++                        width: 56
++                        height: parent.height
++                        radius: 4
++                        // No green here: the selected preset is white, so green
++                        // stays reserved for the dot and the FX-on channel readout.
++                        color: selected ? "white" : "transparent"
++                        border.width: 1
++                        border.color: selected ? "white" : Style.disabled01Color
++
++                        Text {
++                            anchors.centerIn: parent
++                            text: presets.labels[index]
++                            color: parent.selected ? "black" : Style.font02Color
++                            font {
++                                pixelSize: 17
++                                family: root.robotoMediumFontLoader ? root.robotoMediumFontLoader.name : ""
++                                capitalization: Font.AllUppercase
++                            }
++                        }
++
++                        // A MouseArea, like Engine's own slider, takes the touch on
++                        // press. 2.0.0's TapHandler only watched passively, so whatever
++                        // sits under the FX bar took the touch first and taps did nothing.
++                        // Reaches 30 px above and below the button, as the slider does.
++                        MouseArea {
++                            anchors {
++                                fill: parent
++                                topMargin: -30
++                                bottomMargin: -30
++                                leftMargin: -3
++                                rightMargin: -3
++                            }
++                            enabled: presets.parameter !== null
++                            preventStealing: true
++                            onPressed: mouse => {
++                                mouse.accepted = true
++                                presets.tapButton(index)
++                            }
++                        }
++                    }
++                }
++            }
++        }
++    }
++
+     Component {
+         id: patternParameter
+ 
+@@ -115,7 +493,7 @@
+                     case EmbeddedDJFxParameterInterface.Label:
+                         return textParameter
+                     case EmbeddedDJFxParameterInterface.Bipolar:
+-                        return bipolarParameter
++                        return fxParameters.scFreqSimple ? frequencyPresetsParameter : bipolarParameter
+                     case EmbeddedDJFxParameterInterface.Pattern:
+                         return patternParameter
+                     default:

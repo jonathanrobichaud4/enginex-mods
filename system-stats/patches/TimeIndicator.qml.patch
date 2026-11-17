@@ -1,0 +1,71 @@
+--- a/Skins/Embedded/Views/StatusBar/Indicators/TimeIndicator.qml
++++ b/Skins/Embedded/Views/StatusBar/Indicators/TimeIndicator.qml
+@@ -15,6 +15,68 @@
+         id: divider
+     }
+ 
++    // system-stats mod: CPU and RAM use and CPU temperature, written every 2 s by system-stats.sh
++    // to /tmp/enginex-system-stats.ini and read back here through QtCore Settings.
++    TextIndicator {
++        id: stats
++        objectName: "SystemStats"
++
++        anchors.verticalCenter: parent.verticalCenter
++
++        property var store: null
++        property int cpu: -1
++        property int ram: -1
++        property int temp: -1
++
++        TextMetrics {
++            id: statsMetrics
++            font: stats.font
++            text: "CPU 100%  RAM 100%  100°C"
++        }
++
++        active: true
++        visible: cpu >= 0 && ram >= 0
++        color: Style.font02Color
++        font: Style.fontH3
++        horizontalAlignment: Text.AlignRight
++        width: visible ? statsMetrics.boundingRect.width + 14 : 0
++        text: "CPU " + cpu + "%  RAM " + ram + "%" + (temp >= 0 ? "  " + temp + "°C" : "")
++
++        function readStats() {
++            try {
++                if (!store) {
++                    store = Qt.createQmlObject('import QtCore; Settings { location: "file:///tmp/enginex-system-stats.ini"; category: "stats" }',
++                                               stats, "systemStatsStore")
++                }
++                store.sync()
++                const stamp = Number(store.value("time", 0))
++                // Hide when the writer stopped (mod disabled): no update for 10 s.
++                if (!(stamp > 0) || Math.abs(Date.now() / 1000 - stamp) > 10) {
++                    cpu = -1
++                    ram = -1
++                    temp = -1
++                    return
++                }
++                cpu = Math.max(0, Math.min(100, Math.round(Number(store.value("cpu", -1)))))
++                ram = Math.max(0, Math.min(100, Math.round(Number(store.value("ram", -1)))))
++                const t = Math.round(Number(store.value("temp", -1)))
++                temp = t >= 0 && t < 200 ? t : -1
++            } catch (e) {
++                cpu = -1
++                ram = -1
++                temp = -1
++            }
++        }
++
++        Timer {
++            interval: 2000
++            running: true
++            repeat: true
++            triggeredOnStart: true
++            onTriggered: stats.readStats()
++        }
++    }
++
+     TextIndicator {
+         id: clock
+         objectName: "Clock"

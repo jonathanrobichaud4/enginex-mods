@@ -1,0 +1,12 @@
+{
+  "id": "system-stats",
+  "name": "System Stats",
+  "version": "1.1.0",
+  "author": "Jonathan Robichaud",
+  "category": "ui",
+  "description": "Shows CPU use, RAM use and CPU temperature next to the clock in the status bar, updated every 2 seconds. Built for EngineX OS 5.3.0.4 on SC LIVE 4.",
+  "qmlFiles": {
+    "TimeIndicator.qml": "Skins/Embedded/Views/StatusBar/Indicators/TimeIndicator.qml"
+  },
+  "script": "system-stats.sh"
+}

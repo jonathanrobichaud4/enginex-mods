@@ -1,0 +1,264 @@
+--- engine_ui_hook.c.orig	2026-11-14 05:34:16.000000000 -0400
++++ engine_ui_hook.c	2026-11-16 20:51:59.811661928 -0400
+@@ -160,12 +160,39 @@
+ // #58: the toggle is master_limiter=1 in settings.conf, polled once a second
+ // off the audio thread; the limiter itself runs in hook_master_output.
+ static int lim_enabled, gain_enabled; // gain_enabled: #64 auto_gain=1
++// usb-audio-out mod, JP21 only. When this file exists the Live Stream tap (and so
++// /live.wav and USB audio) takes another point of Engine's mixer instead of the
++// final output: "recorder" (default) = the input of Engine's set recorder,
++// "master" = the main output node's input sum. Every second the poll thread writes
++// LIVE_PREMASTER_STATUS with the level and block count seen at each point.
++#define LIVE_PREMASTER_FLAG "/data/enginex/ui/live-premaster"
++#define LIVE_PREMASTER_STATUS "/tmp/enginex-premaster.status"
++enum { TAP_FINAL, TAP_MASTER_SUM, TAP_RECORDER, TAP_COUNT };
++static int live_premaster;          // 0 off, else TAP_MASTER_SUM / TAP_RECORDER (poll thread writes)
++static uint32_t premaster_pushes;   // blocks the alternative tap delivered (audio thread)
++static int live_premaster_dry;      // flag says "-dry": no EngineX master effects on the tap
++static uint32_t tap_blocks[TAP_COUNT];
++static uint32_t tap_peak[TAP_COUNT]; // max |L| x 1e6 since the last status write
++static void tap_measure(int which, const float *left, int frames) {
++    if (!left || frames <= 0) return;
++    float peak = 0;
++    for (int i = 0; i < frames; i++) {
++        float v = left[i] < 0 ? -left[i] : left[i];
++        if (v > peak) peak = v;
++    }
++    uint32_t scaled = peak >= 4000.0f ? 4000000000u : (uint32_t)(peak * 1e6f);
++    if (scaled > __atomic_load_n(&tap_peak[which], __ATOMIC_RELAXED))
++        __atomic_store_n(&tap_peak[which], scaled, __ATOMIC_RELAXED);
++    __atomic_fetch_add(&tap_blocks[which], 1, __ATOMIC_RELAXED);
++}
++static int premaster_ready;
+ static int bt_out_pair;               // bt_out=: output pair sent to Bluetooth (default 0, the first)
+ static int echo_enabled;              // #104 upfader_echo=1: Echo Out on the master bus
+ static int echo_player_bypass;        // standalone players hide Echo Out and Color FX Style; stored values behave as Off
+ static int echo_master_bypass;        // #258 all 5.3.0 consoles use native per-channel Transition FX
+ static unsigned pfx_time_ms;          // #162: zero OFF, otherwise 10..4000
+ static struct sc_pfx_ms master_ms[4];
++static struct sc_pfx_ms tap_ms; // usb-audio-out: the tap's own copy of the chain state
+ static int pioneer_fx_mode;           // #88 Pioneer FX emulations
+ static const char *four_deck_settings = UI_ROOT "/settings.conf";
+ static const char *product_code_path = "/sys/firmware/devicetree/base/inmusic,product-code";
+@@ -384,6 +411,41 @@
+     clock_gettime(CLOCK_MONOTONIC, &resolve);
+     for (;;) {
+         fx_selector_poll();
++        {
++            static unsigned ticks;
++            int source = 0;
++            int fd = open(LIVE_PREMASTER_FLAG, O_RDONLY | O_CLOEXEC);
++            if (fd >= 0) {
++                char word[24] = {0};
++                ssize_t n = read(fd, word, sizeof word - 1);
++                close(fd);
++                source = n > 0 && word[0] == 'm' ? TAP_MASTER_SUM : TAP_RECORDER;
++                // "...-dry": skip EngineX's own master effects on the tap.
++                __atomic_store_n(&live_premaster_dry, n > 0 && strstr(word, "dry") != NULL, __ATOMIC_RELAXED);
++            }
++            __atomic_store_n(&live_premaster, source, __ATOMIC_RELAXED);
++            if (++ticks % 12 == 0) {
++                static const char *names[TAP_COUNT] = {"final", "master-sum", "recorder"};
++                char text[512];
++                int len = snprintf(text, sizeof text, "hook=usb-audio-out-0.6.2 hook_ready=%d source=%s%s\n", premaster_ready,
++                                   source == TAP_MASTER_SUM ? "master-sum" : source == TAP_RECORDER ? "recorder" : "off",
++                                   __atomic_load_n(&live_premaster_dry, __ATOMIC_RELAXED) ? " (dry)" : " (with EngineX effects)");
++                for (int i = 0; i < TAP_COUNT && len > 0 && len < (int)sizeof text; i++) {
++                    double peak = __atomic_exchange_n(&tap_peak[i], 0u, __ATOMIC_RELAXED) / 1e6;
++                    len += snprintf(text + len, sizeof text - len, "%s blocks=%u peak=%.4f\n", names[i],
++                                    __atomic_load_n(&tap_blocks[i], __ATOMIC_RELAXED), peak);
++                }
++                int out = open(LIVE_PREMASTER_STATUS ".tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
++                if (out >= 0) {
++                    if (len > 0 && write(out, text, (size_t)len) == len) {
++                        close(out);
++                        rename(LIVE_PREMASTER_STATUS ".tmp", LIVE_PREMASTER_STATUS);
++                    } else {
++                        close(out);
++                    }
++                }
++            }
++        }
+         static struct stat previous;
+         static int had_settings;
+         struct stat st;
+@@ -432,6 +494,7 @@
+         }
+         if (timing.enabled) {
+             for (unsigned pair = 0; pair < 4; ++pair) sc_ms_prepare(&master_ms[pair]);
++            sc_ms_prepare(&tap_ms);
+ #if !defined(__aarch64__)
+             if (fx_selector_supported) for (unsigned i = 0; i < SC_PFX_UNITS; ++i)
+                 sc_ms_prepare(&sc_pfx_routes[i].dsp.ms);
+@@ -521,7 +584,7 @@
+     uint32_t size;
+     int group; // all sites of a group are applied together or not at all
+ };
+-enum { EDIT_ONE, EDIT_STEMS, EDIT_GATEWAY, EDIT_AUX, EDIT_REC_STREAM, EDIT_GROUP_COUNT };
++enum { EDIT_ONE, EDIT_STEMS, EDIT_GATEWAY, EDIT_AUX, EDIT_REC_STREAM, EDIT_PREMASTER, EDIT_GROUP_COUNT };
+ 
+ // Everything that differs between Engine builds. The hook only patches a build
+ // listed here (exact GNU BuildID), and every site is checked byte for byte first.
+@@ -914,6 +977,40 @@
+ static struct sc_echo master_echo[MASTER_ECHO_PAIRS];
+ #define MASTER_PFX_PAIRS 4
+ static struct sc_master_pioneer_fx master_pfx[MASTER_PFX_PAIRS];
++
++// usb-audio-out: EngineX's master effects (Echo Out, Pioneer FX, Auto-Gain, limiter)
++// normally run on the final output, after Engine's master volume. The pre-master tap
++// runs the same chain, with the same settings, on its own copy of the signal and its
++// own effect state, so the computer gets them too while the master knob stays out.
++// Mirrors the first pair of hook_master_output below; keep the two in step.
++static struct sc_echo tap_echo;
++static struct sc_master_pioneer_fx tap_pfx;
++static struct sc_lim tap_lim;
++static struct sc_gain tap_gain;
++static void tap_master_fx(float *l, float *r, unsigned frames) {
++    int echo = (__atomic_load_n(&echo_player_bypass, __ATOMIC_RELAXED) || __atomic_load_n(&echo_master_bypass, __ATOMIC_RELAXED)) ? 0 : __atomic_load_n(&echo_enabled, __ATOMIC_RELAXED);
++    sc_echo_planar(&tap_echo, l, r, frames, echo);
++    int pfx = __atomic_load_n(&pioneer_fx_mode, __ATOMIC_RELAXED);
++    if (__atomic_load_n(&fx_selector_master_bypass, __ATOMIC_ACQUIRE)) pfx = 0;
++    unsigned ms = __atomic_load_n(&pfx_time_ms, __ATOMIC_ACQUIRE);
++    if ((ms && sc_ms_effect(pfx)) || (__atomic_load_n(&tap_ms.ready, __ATOMIC_ACQUIRE) == 2 && tap_ms.blend > 0.0f)) {
++        for (unsigned i = 0; i < frames; ++i) {
++            float dl = l[i], dr = r ? r[i] : 0.0f;
++            float right = dr;
++            sc_master_pioneer_fx_planar(&tap_pfx, &l[i], r ? &r[i] : NULL, 1, pfx);
++            if (r) right = r[i];
++            sc_ms_mix(&tap_ms, dl, dr, &l[i], &right, pfx, ms, 0.5f, 1);
++            if (r) r[i] = right;
++        }
++    } else {
++        sc_master_pioneer_fx_planar(&tap_pfx, l, r, frames, pfx);
++    }
++    int gain = __atomic_load_n(&gain_enabled, __ATOMIC_RELAXED);
++    if (gain || __atomic_load_n(&lim_enabled, __ATOMIC_RELAXED)) {
++        if (gain) sc_gain_planar(&tap_gain, l, r, frames);
++        sc_lim_planar(&tap_lim, l, r, frames);
++    }
++}
+ // #49: in the 4-deck layout a player's 4-channel device (two stereo pairs) leaves
+ // decks 3 and 4 without output buffers, and Engine skips rendering them ("Mixer
+ // skipped ... unassigned output buffer"): their playheads stand still. All four
+@@ -1206,7 +1303,17 @@
+             sc_lim_planar(&master_lim[ch / 2], out[ch], r, (unsigned)frames);
+         }
+     // #50 Live Stream: the first pair as it goes to the DAC; one relaxed load when nobody listens.
+-    if (out && frames > 0 && out_channels > 0)
++    // usb-audio-out: the Mixer already pushed the pre-master main mix this block; the
++    // post-master pair is the fallback whenever that tap did not run.
++    // It falls back only after 32 blocks without one, so the two never interleave
++    // in the single-producer ring if the Mixer renders on another thread.
++    if (out && frames > 0 && out_channels > 0) tap_measure(TAP_FINAL, out[0], frames);
++    static uint32_t premaster_seen, premaster_idle = 32;
++    uint32_t pushes = __atomic_load_n(&premaster_pushes, __ATOMIC_RELAXED);
++    if (pushes != premaster_seen) premaster_idle = 0;
++    else if (premaster_idle < 32) premaster_idle++;
++    premaster_seen = pushes;
++    if (premaster_idle >= 32 && out && frames > 0 && out_channels > 0)
+         sc_tap_push(&live_tap, out[0], out_channels > 1 ? out[1] : NULL, (uint32_t)frames);
+     // The sender called during orig is still alive here: hand it the finished output now.
+     // Calls without outputs (a player also makes those) add nothing and take nothing away.
+@@ -1611,7 +1718,57 @@
+ #endif
+ }
+ 
++// usb-audio-out pre-master tap, only b946c3b8 / JP21. 0x17b0148 is the DspChain input
++// gather: it sums the node's input connections (with their ramped gains) into its
++// output pair, before the node's own DSP chain runs. For the Mixer's main
++// OutputChannel (Mixer +0x70, output = MixerBuffers pairs 0/1) that chain holds the
++// master Volume GainDsp, so right after the gather the pair is the main mix before
++// the master knob. Every other node passes straight through: two loads and a compare.
++// The set recorder is a RecorderChannel node (vtable 0x2b968e4) whose own process
++// (0x17b0fcc) gathers its inputs through the same 0x17b0148 before its chain
++// (recording gain, RecorderDsp writer). So both points are seen here.
++static uint32_t premaster_sum_jump[2];
++static void (*premaster_sum_native)(void *, int, float **, int);
++static void *premaster_node;
++static float **premaster_out;
++static void *recorder_vtable;
++
++static void premaster_sum(void *node, int channels, float **out, int frames) {
++    premaster_sum_native(node, channels, out, frames);
++    if (!out || frames <= 0 || channels < 1 || !node) return;
++    int which;
++    if (node == __atomic_load_n(&premaster_node, __ATOMIC_RELAXED) &&
++        out == __atomic_load_n(&premaster_out, __ATOMIC_RELAXED))
++        which = TAP_MASTER_SUM;
++    else if (*(void **)node == recorder_vtable)
++        which = TAP_RECORDER;
++    else
++        return;
++    tap_measure(which, out[0], frames);
++    if (__atomic_load_n(&live_premaster, __ATOMIC_RELAXED) != which) return;
++    if (__atomic_load_n(&live_premaster_dry, __ATOMIC_RELAXED)) {
++        sc_tap_push(&live_tap, out[0], channels > 1 ? out[1] : NULL, (uint32_t)frames);
++    } else {
++        // Engine's buffer is the recorder's input: process a copy, never the original.
++        static float copy_l[1024], copy_r[1024];
++        float *r_in = channels > 1 ? out[1] : NULL;
++        for (int done = 0; done < frames;) {
++            unsigned n = (unsigned)(frames - done) > 1024u ? 1024u : (unsigned)(frames - done);
++            memcpy(copy_l, out[0] + done, n * sizeof(float));
++            if (r_in) memcpy(copy_r, r_in + done, n * sizeof(float));
++            tap_master_fx(copy_l, r_in ? copy_r : NULL, n);
++            sc_tap_push(&live_tap, copy_l, r_in ? copy_r : NULL, n);
++            done += (int)n;
++        }
++    }
++    __atomic_fetch_add(&premaster_pushes, 1, __ATOMIC_RELAXED);
++}
++
+ static void sclive_aux_process(void *mixer, void *buffers) {
++    if (premaster_ready) {
++        __atomic_store_n(&premaster_node, *(void **)((char *)mixer + 0x70), __ATOMIC_RELAXED);
++        __atomic_store_n(&premaster_out, (float **)buffers, __ATOMIC_RELAXED);
++    }
+ #ifdef ENGINE_UI_HOOK_AUX_TRACE
+     unsigned tid = (unsigned)syscall(SYS_gettid);
+     __atomic_fetch_add(&sclive_aux_trace[0], 1, __ATOMIC_RELAXED);
+@@ -1730,6 +1887,20 @@
+     aux_control_jump[1] = (uint32_t)(uintptr_t)sclive_aux_changed;
+     aux_init_jump[1] = (uint32_t)(uintptr_t)sclive_aux_construct;
+     aux_ready = 1;
++    // Displaced strd r4,r5,[sp,#-0x24]! and mov ip,#1 are position independent.
++    premaster_ready = 0;
++    premaster_sum_jump[1] = 0;
++    if (!memcmp((void *)(base + 0x17b0148), "\xf4\x42\x6d\xe1\x01\xc0\xa0\xe3", 8) &&
++        !memcmp((void *)(base + 0x1917cb4), "\x23\x61\xfa\xeb", 4)) { // the chain's bl to it
++        uint32_t sum[] = {0xe16d42f4, 0xe3a0c001, 0xe51ff004, (uint32_t)(base + 0x17b0150)};
++        premaster_sum_native = rx_code(sum, sizeof sum, page);
++        if (premaster_sum_native) {
++            premaster_sum_jump[0] = 0xe51ff004;
++            premaster_sum_jump[1] = (uint32_t)(uintptr_t)premaster_sum;
++            recorder_vtable = (void *)(base + 0x2b968e4); // RecorderChannel vtable address point
++            premaster_ready = 1;
++        }
++    }
+ }
+ 
+ // The standalone players (SC5000, SC5000M, SC6000, SC6000M).
+@@ -2092,6 +2263,7 @@
+     {0xcbd96cu, "\xf4\x42\x6d\xe1\xf8\x60\xcd\xe1", (const char *)aux_process_jump, 8, EDIT_AUX},
+     {0xdba454u, "\xf8\x41\x6d\xe1\xec\xc2\x9f\xe5", (const char *)aux_control_jump, 8, EDIT_AUX},
+     {0x1ba13c0u, "\xf4\x42\x6d\xe1\x00\x40\xa0\xe1", (const char *)aux_init_jump, 8, EDIT_AUX},
++    {0x17b0148u, "\xf4\x42\x6d\xe1\x01\xc0\xa0\xe3", (const char *)premaster_sum_jump, 8, EDIT_PREMASTER},
+     {0x8ba000u, "\xc0\x26\x9f\xe5\xc0\x36\x9f\xe5\xf4\x42\x6d\xe1\xf8\xa1\xcd\xe1\xf8\x60\xcd\xe1\xf0\x81\xcd\xe1\x20\xe0\x8d\xe5\x20\xb0\x8d\xe2\xe4\xd0\x4d\xe2\x02\x20\x8f\xe0\x3c\x10\x91\xe5\x00\x01\x0b\xe5\x98\x46\x9f\xe5\x03\x30\x92\xe7\x00\x00\x51\xe3\x04\x40\x8f",
+         "\x10\x40\x2d\xe9\x00\x40\xa0\xe1\x1e\x10\xa0\xe3\x0c\x20\x8f\xe2\x47\x9c\xe2\xeb\x04\x00\xa0\xe1\x10\x80\xbd\xe8\x00\xf0\x20\xe3\x2f\x75\x73\x72\x2f\x6c\x6f\x63\x61\x6c\x2f\x62\x69\x6e\x2f\x73\x74\x65\x6d\x73\x2d\x70\x72\x6f\x63\x65\x73\x73\x6f\x72\x00", 63, EDIT_STEMS},
+     {0x8bbaa4u, "\x8c\xc7\x9f\xe5", "\x1e\xff\x2f\xe1", 4, EDIT_STEMS},
+@@ -2209,6 +2381,7 @@
+     int ready[EDIT_GROUP_COUNT];
+     for (unsigned i = 0; i < EDIT_GROUP_COUNT; i++) ready[i] = 1;
+     ready[EDIT_AUX] = aux_ready;
++    ready[EDIT_PREMASTER] = aux_ready && premaster_ready;
+     ready[EDIT_REC_STREAM] = !player_board();
+     for (unsigned i = 0; i < build->edit_count; i++)
+         if (!edit_state(base, &build->edits[i])) ready[build->edits[i].group] = 0;
+@@ -2217,6 +2390,7 @@
+         if (e->group != EDIT_ONE && !ready[e->group]) continue;
+         // An unprepared trampoline is all zero: never write it.
+         if (e->replacement == (const char *)stems_feature_jump && !stems_feature_jump[1]) continue;
++        if (e->replacement == (const char *)premaster_sum_jump && !premaster_sum_jump[1]) continue;
+         if (e->replacement == (const char *)shadow_sync_play_jump && !shadow_sync_play_jump[1]) continue;
+         char *at = (char *)(base + e->offset);
+         if (edit_state(base, e) != 1) continue;

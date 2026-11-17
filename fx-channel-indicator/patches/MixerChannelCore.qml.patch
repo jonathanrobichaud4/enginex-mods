@@ -1,0 +1,44 @@
+--- a/ControlSurfaceModules/ControlSurfaceModules/MixerChannelCore.qml
++++ b/ControlSurfaceModules/ControlSurfaceModules/MixerChannelCore.qml
+@@ -16,7 +16,31 @@
+     property int bassCC: MidiValue.Invalid
+     property alias faderCC: fader.cc
+ 
+-    readonly property bool canToggleMode: module.pflShiftAction == Action.ToggleChannelStripMode
++    readonly property bool canToggleMode: Config.audio.hasStemsLevel || module.pflShiftAction == Action.ToggleChannelStripMode
++
++    // fx-channel-indicator mod: blink this channel's headphone CUE (PFL) LED while
++    // FX is ON and assigned to this channel (SC LIVE 4 FX assign rotary). With FX
++    // off the LED behaves exactly like stock. Cue off: even blink. Cue on: lit
++    // with a short dip each second, so cueing stays visible.
++    function scFxState(leaf) {
++        if (Config.audio.fx.sendEffectSlots !== 0) return false
++        const prop = Planck.getProperty(`/Engine/Mixer/Channel${mixerChannelConfig.name}/DJFx/${leaf}`)
++        return !!(prop && prop.translator && prop.translator.state === true)
++    }
++    readonly property bool scFxHere: scFxState("Assigned") && scFxState("Active")
++    property int scFxPhase: 0 // 0..7, 125 ms steps
++    Timer {
++        interval: 125
++        repeat: true
++        running: module.scFxHere
++        onRunningChanged: module.scFxPhase = 0
++        onTriggered: module.scFxPhase = (module.scFxPhase + 1) % 8
++    }
++    function scPflLedValue(isActive) {
++        if (!scFxHere) return isActive ? 127 : 1
++        if (isActive) return scFxPhase === 7 ? 1 : 127
++        return scFxPhase < 4 ? 127 : 1
++    }
+ 
+     ValueNoteAssignment {
+         objectName: "PFL Mixer Channel %1".arg(mixerChannelConfig.name)
+@@ -72,7 +96,7 @@
+                 if (module.canToggleMode && mixerChannelConfig.inStemsLevelMode && globalConfig.shift) {
+                     globalConfig.flashState ? 127 : 1
+                 } else {
+-                    isActive ? 127 : 1
++                    module.scPflLedValue(isActive)
+                 }
+             }
+ 

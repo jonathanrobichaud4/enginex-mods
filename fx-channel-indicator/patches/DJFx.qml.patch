@@ -1,0 +1,132 @@
+--- a/Skins/Embedded/Views/MainView/Fx/DJFx.qml
++++ b/Skins/Embedded/Views/MainView/Fx/DJFx.qml
+@@ -3,6 +3,7 @@
+ import QtQuick.Layouts 1.12
+ 
+ import Planck 1.0
++import Common
+ import EngineOS.UI.Controls 1.0
+ import EngineOS.UI.Style 1.0
+ 
+@@ -13,6 +14,27 @@
+ 
+     property string indicator
+ 
++    readonly property int scFxUnit: Config.audio.fx.sendEffectSlots > 0 ? (indicator === "2" ? 2 : 1) : 3
++    readonly property var scFxController: root.scFxControllers[scFxUnit - 1] || null
++    readonly property var scFxNames: scFxController ? scFxController.scFxNames : (djFxView ? Array.from(djFxView.effectsNames) : [])
++    readonly property int scFxIndex: scFxController ? scFxController.scFxIndex : -1
++    readonly property int scFxSelected: scFxController ? scFxController.scFxSelected : -1
++    function scFxRegister() { if (scFxController && djFxView) scFxController.djFxView = djFxView }
++    onScFxControllerChanged: scFxRegister()
++    onDjFxViewChanged: scFxRegister()
++    Component.onCompleted: scFxRegister()
++    function scFxAccept(index) {
++        if (scFxController && scFxController.scFxEnabled) scFxController.scFxAccept(index)
++        else if (djFxView) djFxView.selectEffect(index)
++    }
++    function scFxAbort() {
++        if (scFxController) {
++            scFxController.scFxBrowsing = false
++            scFxController.scFxIndex = scFxController.scFxSelected
++        }
++        if (djFxView) djFxView.abortSelecting()
++    }
++
+     required property EmbeddedDJFxViewInterface djFxView
+     required property bool suppressPopups
+     onSuppressPopupsChanged: djFxView && djFxView.onSuppressPopups(suppressPopups)
+@@ -21,6 +43,74 @@
+ 
+     readonly property bool playerViewVisible: Planck.getProperty("/GUI/ShowBrowseView").translator.state === false
+ 
++    // fx-channel-indicator mod: which mixer channel the FX unit is assigned to.
++    // Single-unit consoles keep one boolean per channel plus Main. On SC LIVE 4 the
++    // FX assign rotary (DJFxAssignSwitch, CC 40) sets exactly one of them. Send-style
++    // units (PRIME 4) store assignment differently, so the readout stays hidden there.
++    function scAssignTranslator(path) {
++        const p = Planck.getProperty(path)
++        return p && p.translator ? p.translator : null
++    }
++    readonly property var scAssignTranslators: {
++        const list = []
++        if (Config.audio.fx.sendEffectSlots > 0) return list
++        const channels = Config.audio.numberOfDecks === 4 ? 4 : 2
++        for (let ch = 1; ch <= channels; ++ch)
++            list.push({label: String(ch), translator: scAssignTranslator("/Engine/Mixer/Channel" + ch + "/DJFx/Assigned")})
++        list.push({label: "M", translator: scAssignTranslator("/Engine/Mixer/Main/DJFx/Assigned")})
++        return list.filter(entry => entry.translator !== null)
++    }
++    readonly property bool scAssignShown: scAssignTranslators.length > 0
++    readonly property string scAssignText: {
++        const on = []
++        for (let i = 0; i < scAssignTranslators.length; ++i)
++            if (scAssignTranslators[i].translator.state) on.push(scAssignTranslators[i].label)
++        // SC LIVE 4's FX assign rotary always selects exactly one position.
++        if (on.length === 1) return on[0] === "M" ? "MASTER" : "CH " + on[0]
++        return on.join(" ")
++    }
++
++    ColumnLayout {
++        objectName: `DJFx${djFx.indicator}_Assign_Indicator`
++        visible: djFx.scAssignShown
++        Layout.fillHeight: true
++        Layout.preferredWidth: 96
++        Layout.maximumWidth: 96
++        Layout.leftMargin: 12
++        Layout.topMargin: 10
++        Layout.bottomMargin: 10
++        spacing: 0
++
++        Text {
++            Layout.fillWidth: true
++            horizontalAlignment: Text.AlignLeft
++            text: Math.scI18n ? Math.scI18n.t("FX ASSIGN") : "FX ASSIGN"
++            font: Style.fontH4
++            fontSizeMode: Text.HorizontalFit
++            minimumPixelSize: 9
++            color: Style.font02Color
++        }
++
++        Text {
++            Layout.fillWidth: true
++            Layout.fillHeight: true
++            horizontalAlignment: Text.AlignLeft
++            verticalAlignment: Text.AlignVCenter
++            text: djFx.scAssignText !== "" ? djFx.scAssignText : "–"
++            // Same face as the effect name (DJFxTextParameter): Roboto Medium 21px, uppercase.
++            font {
++                pixelSize: 21
++                family: root.robotoMediumFontLoader ? root.robotoMediumFontLoader.name : ""
++                capitalization: Font.AllUppercase
++            }
++            fontSizeMode: Text.HorizontalFit
++            minimumPixelSize: 12
++            // Green only while FX is on; white otherwise.
++            color: djFx.scAssignText === "" ? Style.disabled01Color
++                : (djFxView && djFxView.enabled ? Style.active01Color : "white")
++        }
++    }
++
+     Button {
+         Layout.minimumWidth: 160
+         Layout.maximumWidth: 160
+@@ -36,13 +126,14 @@
+             objectName: `DJFx${djFx.indicator}_Name_Parameter`
+             effectActive: djFxView && djFxView.enabled
+             parameter: djFxView ? djFxView.selectParameter : null
++            text: djFx.scFxSelected >= 0 ? djFx.scFxNames[djFx.scFxSelected] : (parameter ? parameter.valueText : "")
+ 
+             DJFxSelectCarousel {
+                 objectName: `DJFx${djFx.indicator}_Select_Carousel`
+-                model: djFxView ? djFxView.effectsNames : {}
+-                index: djFxView ? djFxView.selectionIndex : 0
+-                onAccepted: result => djFxView.selectEffect(result)
+-                onRejected: djFxView.abortSelecting()
++                model: djFx.scFxNames
++                index: djFx.scFxIndex >= 0 ? djFx.scFxIndex : (djFxView ? djFxView.selectionIndex : 0)
++                onAccepted: result => djFx.scFxAccept(result)
++                onRejected: djFx.scFxAbort()
+                 visible: (Config.device.hasSideScreens || playerViewVisible) &&
+                     djFxView &&
+                     djFxView.selectionPopoutVisible &&

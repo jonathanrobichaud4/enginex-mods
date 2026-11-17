@@ -1,0 +1,55 @@
+--- a/ControlSurfaceModules/ControlSurfaceModules/GlobalAssignmentConfig.qml
++++ b/ControlSurfaceModules/ControlSurfaceModules/GlobalAssignmentConfig.qml
+@@ -5,7 +5,52 @@
+ import "./private" as Private
+ 
+ Item {
++    id: scGlobalConfig
+     objectName: "Global Assignment Config"
++    property real scPadBrightness: 1
++    property bool scSwapLoopOrder: false
++    property bool scReverseJogLeft: false
++    property bool scReverseJogRight: false
++    property var pReverseJogLeft: Planck.getProperty("/GUI/Scripted/EngineXJogInvertLeft")
++    property var pReverseJogRight: Planck.getProperty("/GUI/Scripted/EngineXJogInvertRight")
++    property var pReverseJogReady: Planck.getProperty("/GUI/Scripted/EngineXJogInvertReady")
++    readonly property bool scReverseJogLeftEffective: (pReverseJogReady && pReverseJogReady.translator && pReverseJogReady.translator.state && pReverseJogLeft && pReverseJogLeft.translator) ? !!pReverseJogLeft.translator.state : scReverseJogLeft
++    readonly property bool scReverseJogRightEffective: (pReverseJogReady && pReverseJogReady.translator && pReverseJogReady.translator.state && pReverseJogRight && pReverseJogRight.translator) ? !!pReverseJogRight.translator.state : scReverseJogRight
++    function scIsReverseJog(deckName) {
++        return deckName === "Right" ? scReverseJogRightEffective : scReverseJogLeftEffective
++    }
++    Timer {
++        interval: 500
++        running: !scGlobalConfig.pReverseJogReady || !scGlobalConfig.pReverseJogReady.translator || !scGlobalConfig.pReverseJogLeft || !scGlobalConfig.pReverseJogLeft.translator || !scGlobalConfig.pReverseJogRight || !scGlobalConfig.pReverseJogRight.translator
++        repeat: true
++        onTriggered: {
++            if (!scGlobalConfig.pReverseJogLeft || !scGlobalConfig.pReverseJogLeft.translator)
++                scGlobalConfig.pReverseJogLeft = Planck.getProperty("/GUI/Scripted/EngineXJogInvertLeft")
++            if (!scGlobalConfig.pReverseJogRight || !scGlobalConfig.pReverseJogRight.translator)
++                scGlobalConfig.pReverseJogRight = Planck.getProperty("/GUI/Scripted/EngineXJogInvertRight")
++            if (!scGlobalConfig.pReverseJogReady || !scGlobalConfig.pReverseJogReady.translator)
++                scGlobalConfig.pReverseJogReady = Planck.getProperty("/GUI/Scripted/EngineXJogInvertReady")
++        }
++    }
++    Timer {
++        interval: 10000; running: true; repeat: true; triggeredOnStart: true
++        onTriggered: {
++            const x = new XMLHttpRequest()
++            x.onreadystatechange = function() {
++                if (x.readyState !== XMLHttpRequest.DONE || x.status !== 200) return
++                try {
++                    const j = JSON.parse(x.responseText)
++                    const n = parseInt(j.ledBrightness)
++                    if (n >= 20 && n <= 100) scGlobalConfig.scPadBrightness = n / 100
++                    scGlobalConfig.scSwapLoopOrder = !!j.swapLoopOrder
++                    scGlobalConfig.scReverseJogLeft = !!j.jogInvertLeft
++                    scGlobalConfig.scReverseJogRight = !!j.jogInvertRight
++                } catch (e) {}
++            }
++            x.open("GET", "http://127.0.0.1:8080/v1/sc5000/ui")
++            x.send()
++        }
++    }
+ 
+     property alias bluetooth: bluetoothConfig
+ 

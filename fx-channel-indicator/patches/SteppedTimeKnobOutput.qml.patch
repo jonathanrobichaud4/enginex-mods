@@ -1,0 +1,153 @@
+--- a/ControlSurfaceModules/ControlSurfaceModules/private/SteppedTimeKnobOutput.qml
++++ b/ControlSurfaceModules/ControlSurfaceModules/private/SteppedTimeKnobOutput.qml
+@@ -1,15 +1,150 @@
+ import QtQuick 2.12
++import Planck 1.0
+ 
++// Stock Engine 5.3.0 FX parameter knob (stepped encoder), plus the
++// fx-channel-indicator mod: in "Low / Mid / High" mode (Settings > Fx), when the
++// knob is on the Frequency parameter, each click jumps straight to the next
++// frequency preset instead of nudging the filter (no audible sweep).
+ QtObject {
+     id: module
+ 
+     property string channelName
+ 
++    // Must match the presets in FxParameters.qml. Positions on Engine's frequency
++    // control (FilterCutoff, 0 to 1): 0.5 = all bands, below = lows only, above =
++    // highs only. Knob order is slider order: LOW, LOW + MID, ALL, MID + HIGH, HIGH.
++    readonly property var scPositions: [15 / 124, 40 / 124, 0.5, 78 / 124, 103 / 124]
++
++    // The mode is written by the Settings > Fx toggle into the mod's settings file.
++    // fx-channel-indicator mod: reading the mod's settings from controller code.
++    // Engine's controller modules run in their own QML engine, so they can't see
++    // the screens' settings object. Two ways to read the settings file, each
++    // guarded; failures are logged once with the reason.
++    property var scReader: null // QtCore Settings on the mod's settings file
++    property var scLogged: ({}) // messages already logged
++    readonly property string scSettingsPath: "/data/enginex/ui/mod-fx-channel-indicator.ini"
++    function scLogOnce(msg) {
++        if (scLogged[msg]) return
++        scLogged[msg] = true
++        console.warn("fx-channel-indicator: " + msg)
++    }
++    function scTruthy(v) {
++        return v === true || v === "true" || v === 1 || v === "1"
++    }
++    // Returns {ok, values} with every key of the [fxFrequency] group as strings.
++    function scReadSettings(keys) {
++        const values = {}
++        try {
++            if (!scReader) {
++                scReader = Qt.createQmlObject(
++                    'import QtCore; Settings { location: "file://' + scSettingsPath + '"; category: "fxFrequency" }',
++                    module, "fxChannelIndicatorReader")
++            }
++            scReader.sync()
++            for (const k of keys) values[k] = String(scReader.value(k, ""))
++            return {ok: true, values: values, writable: true}
++        } catch (e) {
++            scReader = null
++            scLogOnce("QtCore Settings unavailable in controller code (" + e + "), reading the file directly")
++        }
++        try {
++            const x = new XMLHttpRequest()
++            x.open("GET", "file://" + scSettingsPath, false)
++            x.send()
++            const text = String(x.responseText || "")
++            let inGroup = false
++            for (const raw of text.split(/\r?\n/)) {
++                const line = raw.trim()
++                if (line.startsWith("[")) { inGroup = line === "[fxFrequency]"; continue }
++                const eq = line.indexOf("=")
++                if (!inGroup || eq < 1) continue
++                const k = line.slice(0, eq).trim(), v = line.slice(eq + 1).trim()
++                if (keys.indexOf(k) !== -1) values[k] = v.replace(/^"(.*)"$/, "$1")
++            }
++            return {ok: text !== "", values: values, writable: false}
++        } catch (e) {
++            scLogOnce("cannot read " + scSettingsPath + " (" + e + ")")
++        }
++        return {ok: false, values: values, writable: false}
++    }
++    function scWriteSetting(key, value) {
++        try {
++            if (scReader) {
++                scReader.setValue(key, value)
++                scReader.sync()
++            }
++        } catch (e) {
++            scLogOnce("cannot write " + key + " (" + e + ")")
++        }
++    }
++    property var scSettingsCache: ({})
++    property double scSettingsReadAt: 0
++    function scSettingsNow() {
++        // At most one file read per 250 ms, however fast the knob turns.
++        const now = Date.now()
++        if (now - scSettingsReadAt > 250) {
++            scSettingsReadAt = now
++            const r = scReadSettings(["simple", "frequencyLabel"])
++            scSettingsCache = r.ok ? r.values : {}
++        }
++        return scSettingsCache
++    }
++    function scSimpleMode() {
++        // Shared Planck property published by the FX bar / Settings > Fx.
++        try {
++            const p = Planck.getProperty("/GUI/Scripted/EngineXModFxPresets")
++            if (p && p.translator) return p.translator.state === true
++        } catch (e) {}
++        return scTruthy(scSettingsNow()["simple"]) // fallback: the mod's settings file
++    }
++    function scFrequencyLabel() {
++        return String(scSettingsNow()["frequencyLabel"] || "")
++    }
++    function scKnobOnFrequency(channel) {
++        const name = String(channel.paramName || "").trim().toLowerCase()
++        if (name === "") return false
++        const label = scFrequencyLabel().trim().toLowerCase()
++        if (label !== "" && name === label) return true
++        return ["frequency", "freq", "filter", "cutoff"].indexOf(name) !== -1
++    }
++    function scStepPreset(channel, direction) {
++        const prop = channel.pFilterCutoff
++        if (!prop || !prop.translator) return false
++        const pos = Number(prop.translator.value)
++        let current = -1
++        for (let i = 0; i < scPositions.length; ++i)
++            if (Math.abs(pos - scPositions[i]) < 0.5 / 124) current = i
++        let target
++        if (current === -1) {
++            target = 0
++            for (let i = 1; i < scPositions.length; ++i)
++                if (Math.abs(pos - scPositions[i]) < Math.abs(pos - scPositions[target])) target = i
++        } else {
++            target = Math.max(0, Math.min(scPositions.length - 1, current + direction))
++        }
++        if (target !== current) prop.translator.value = scPositions[target]
++        return true
++    }
++
+     function setValue(channel, value, assignmentEnabled) {
+         if (!assignmentEnabled) {
+             return
+         }
+ 
++        let handled = false
++        try {
++            const fxChannel = fxConfig.channel[module.channelName]
++            handled = !!fxChannel && module.scSimpleMode() && module.scKnobOnFrequency(fxChannel) &&
++                module.scStepPreset(fxChannel, value > 0.5 ? -1 : 1)
++        } catch (e) {
++            // Anything unexpected: forget the cached reader and behave like stock.
++            module.scReader = null
++            handled = false
++        }
++        if (handled) {
++            return
++        }
++
+         if (value > 0.5) {
+             fxConfig.channel[module.channelName].pFxHwParamTwist.translator.decValue(1, 1)
+         } else {
