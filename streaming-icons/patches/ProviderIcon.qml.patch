@@ -1,23 +1,25 @@
 --- a/Skins/Embedded/Views/BrowseView/Components/Components/ProviderIcon.qml
 +++ b/Skins/Embedded/Views/BrowseView/Components/Components/ProviderIcon.qml
-@@ -2,11 +2,39 @@
+@@ -2,11 +2,42 @@
  import EngineOS.UI.Style 1.0
  import "../../../../Items"
  
 +// Streaming Icons mod: the small service icon next to each track in the browser.
 +//
-+// EngineX's OmniSource plays tracks from Spotify, Deezer, NetEase, SoundCloud, Beatport,
-+// Apple Music and the drives through Engine's TIDAL player, so Engine marks every one of them
-+// with the TIDAL icon. EngineX's gateway puts the real service at the start of the provider
-+// label (for example "Spotify [124 BPM 8A]"), so this picks the icon from that instead.
-+// Real TIDAL tracks, and anything not recognised, keep Engine's own icon.
++// EngineX's OmniSource plays tracks from Spotify, Deezer, NetEase, SoundCloud, Beatport and
++// Apple Music through Engine's TIDAL player, so Engine marks every one of them with the TIDAL
++// icon (their provider label stays "TIDAL"). EngineX keeps the service you're browsing in
++// root.scScope, and every streaming row on screen comes from it, so the icon follows that.
++// Real TIDAL browsing, local tracks and anything not recognised keep Engine's own icon.
  Item {
 +    id: providerIconRoot
      width: 24
      height: 24
      visible: image.source != ""
  
-+    readonly property string serviceLabel: row.streamingProviderName || ""
++    // "" outside EngineX or before it has picked a service.
++    readonly property string scope: (typeof root !== "undefined" && root && root.scScope) ? String(root.scScope) : ""
++    readonly property bool streamingRow: (row.streamingProviderName || "") !== ""
 +    readonly property string iconDir: "qrc:/Skins/UIKit/Icons/"
 +    // Engine has no Spotify, Deezer or NetEase icon; these are single-colour versions of the
 +    // logos, tinted like the rest of the list.
@@ -26,21 +28,22 @@
 +    readonly property string neteaseIcon: "data:image/png;base64,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"
 +
 +    readonly property string serviceIcon: {
-+        const l = serviceLabel
-+        if (l.startsWith("Spotify")) return spotifyIcon
-+        if (l.startsWith("Deezer")) return deezerIcon
-+        if (l.startsWith("\u7f51\u6613\u4e91\u97f3\u4e50")) return neteaseIcon // NetEase Cloud Music
-+        if (l.startsWith("SoundCloud")) return iconDir + "SourceSoundCloud.png"
-+        if (l.startsWith("Beatport")) return iconDir + "SourceBeatport%20LINK.png"
-+        if (l.startsWith("Apple Music")) return iconDir + "SourceAppleMusic.png"
-+        if (l.startsWith("USB/SD")) return iconDir + "SourceUSB.png"
-+        return ""
++        if (!streamingRow) return ""
++        switch (scope) {
++        case "spotify": return spotifyIcon
++        case "deezer": return deezerIcon
++        case "netease": return neteaseIcon
++        case "soundcloud": return iconDir + "SourceSoundCloud.png"
++        case "beatport": return iconDir + "SourceBeatport%20LINK.png"
++        case "applemusic": return iconDir + "SourceAppleMusic.png"
++        default: return ""   // tidal, or no service picked yet
++        }
 +    }
 +
      ColoredImage {
          id: image
          objectName: "Browser_TrackList_ViewDelegate_ProviderIcon"
-@@ -17,6 +45,6 @@
+@@ -17,6 +48,6 @@
          height: (src.height / src.width) * width
          visible: source != ""
          color: Style.icon01Color
