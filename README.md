@@ -7,12 +7,13 @@ Mods for [EngineX OS](https://github.com/Cd1s/EngineX-OS) on the Denon DJ SC LIV
 | [USB Audio Out](usb-audio-out/) | 0.6.2 | Sends the master (before the master volume, with EngineX's master effects) to a computer on the USB-B port as a 48 kHz stereo sound card input. |
 | [FX Channel Indicator](fx-channel-indicator/) | 2.2.0 | Shows which channel the FX unit is on, blinks that channel's CUE LED, adds a band mode for the FX frequency control (LOW / MID / HIGH, combinable), and reverse jog wheel switches on 5.3.0.4. |
 | [System Stats](system-stats/) | 1.1.0 | CPU use, RAM use and CPU temperature next to the clock. |
+| [Streaming Icons](streaming-icons/) | 1.0.0 | Shows each track's real service icon in the browser (Spotify, Deezer, NetEase, SoundCloud, Beatport, Apple Music, USB/SD) instead of TIDAL on everything EngineX plays through TIDAL. |
 
 `tools/streaming/` has the diagnostic scripts used to debug the streaming services (they mask tokens and passwords in their reports).
 
 ## Building
 
-FX Channel Indicator and System Stats change some of Engine's own QML. Engine's QML belongs to inMusic, so this repo only stores the changes, as patches against the stock files, and you build the packages from your own firmware. The easiest way to get the stock files is the [SC LIVE 4 emulator](https://github.com/jonathanrobichaud4/sclive4-emulator):
+FX Channel Indicator, System Stats and Streaming Icons change some of Engine's own QML. Engine's QML belongs to inMusic, so this repo only stores the changes, as patches against the stock files, and you build the packages from your own firmware. The easiest way to get the stock files is the [SC LIVE 4 emulator](https://github.com/jonathanrobichaud4/sclive4-emulator):
 
 ```sh
 sudo ~/sclive4-emulator/emu.sh dump-qml ~/engine-qml     # stock QML from your firmware

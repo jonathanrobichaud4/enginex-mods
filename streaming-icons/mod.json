@@ -1,0 +1,11 @@
+{
+  "id": "streaming-icons",
+  "name": "Streaming Icons",
+  "version": "1.0.0",
+  "author": "Jonathan Robichaud",
+  "category": "ui",
+  "description": "Shows each track's real streaming service icon in the browser (Spotify, Deezer, NetEase, SoundCloud, Beatport, Apple Music, USB/SD) instead of the TIDAL icon on every track that EngineX plays through TIDAL. Built for SC LIVE 4 on EngineX 5.3.0.4.",
+  "qmlFiles": {
+    "ProviderIcon.qml": "Skins/Embedded/Views/BrowseView/Components/Components/ProviderIcon.qml"
+  }
+}
