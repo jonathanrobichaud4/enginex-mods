@@ -7,7 +7,7 @@ Mods for [EngineX OS](https://github.com/Cd1s/EngineX-OS) on the Denon DJ SC LIV
 | [USB Audio Out](usb-audio-out/) | 0.6.2 | Sends the master (before the master volume, with EngineX's master effects) to a computer on the USB-B port as a 48 kHz stereo sound card input. |
 | [FX Channel Indicator](fx-channel-indicator/) | 2.2.0 | Shows which channel the FX unit is on, blinks that channel's CUE LED, adds a band mode for the FX frequency control (LOW / MID / HIGH, combinable), and reverse jog wheel switches on 5.3.0.4. |
 | [System Stats](system-stats/) | 1.1.0 | CPU use, RAM use and CPU temperature next to the clock. |
-| [Streaming Icons](streaming-icons/) | 1.0.1 | Shows each track's real service icon in the browser (Spotify, Deezer, NetEase, SoundCloud, Beatport, Apple Music) instead of TIDAL on everything EngineX plays through TIDAL. |
+| [Streaming Icons](streaming-icons/) | 1.1.0 | Shows each track's real service icon (Spotify, Deezer, NetEase, SoundCloud, Beatport, Apple Music, USB/SD) in the browser and on the decks, per track, instead of TIDAL on everything EngineX plays through TIDAL. |
 
 `tools/streaming/` has the diagnostic scripts used to debug the streaming services (they mask tokens and passwords in their reports).
 
@@ -17,8 +17,10 @@ FX Channel Indicator, System Stats and Streaming Icons change some of Engine's o
 
 ```sh
 sudo ~/sclive4-emulator/emu.sh dump-qml ~/engine-qml     # stock QML from your firmware
-./build.sh ~/engine-qml                                  # -> dist/<mod>-<version>.tar.gz
+./build.sh ~/engine-qml ~/sclive4-emulator/rootfs/data/enginex/ui/packs/en   # -> dist/<mod>-<version>.tar.gz
 ```
+
+The second folder is EngineX's UI pack (MIT licensed). Streaming Icons also changes two of EngineX's own files, so its patches for those are against the pack; on a deck it's `/data/sc5000-custom/ui/packs/en`. The other mods only need the first argument.
 
 The patches are made against Engine 5.3.0 for SC LIVE 4. Upload the packages in `dist/` through the Mod Hub.
 

@@ -6,13 +6,19 @@
 # from your own firmware with the emulator (https://github.com/jonathanrobichaud4/sclive4-emulator):
 #
 #   sudo ~/sclive4-emulator/emu.sh dump-qml ~/engine-qml
-#   ./build.sh ~/engine-qml
+#   ./build.sh ~/engine-qml [ENGINEX_PACK_DIR]
+#
+# A few files are EngineX's own versions (its UI pack replaces them on the deck), so their patches
+# are against that pack instead; a mod lists them in patches/enginex-base. ENGINEX_PACK_DIR is
+# the pack's language folder: /data/sc5000-custom/ui/packs/en on the deck, or in the emulator
+# ~/sclive4-emulator/rootfs/data/enginex/ui/packs/en. Mods without such files don't need it.
 #
 # Needs: sh, python3, patch, tar. Patches are made against Engine 5.3.0 for SC LIVE 4.
 set -eu
 
 STOCK=${1:-}
-[ -d "$STOCK" ] || { echo "usage: ./build.sh STOCK_QML_DIR   (see the top of this file)" >&2; exit 1; }
+PACK=${2:-}
+[ -d "$STOCK" ] || { echo "usage: ./build.sh STOCK_QML_DIR [ENGINEX_PACK_DIR]   (see the top of this file)" >&2; exit 1; }
 HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$HERE/dist
 WORK=$(mktemp -d)
@@ -34,10 +40,15 @@ for dir in "$HERE"/*/; do
     python3 -c 'import json,sys
 for f, res in json.load(open(sys.argv[1])).get("qmlFiles", {}).items(): print(f + "\t" + res)' "$dir/mod.json" > "$WORK/qml.list"
     while IFS='	' read -r file res; do
-        [ -f "$STOCK/$res" ] || { echo "missing stock file: $STOCK/$res" >&2; exit 1; }
-        cp "$STOCK/$res" "$stage/$file"
+        base=$STOCK what="stock"
+        if [ -f "$dir/patches/enginex-base" ] && grep -qx "$file" "$dir/patches/enginex-base"; then
+            [ -d "$PACK" ] || { echo "$id: $file patches EngineX's UI pack; pass its folder as the 2nd argument" >&2; exit 1; }
+            base=$PACK what="EngineX pack"
+        fi
+        [ -f "$base/$res" ] || { echo "missing $what file: $base/$res" >&2; exit 1; }
+        cp "$base/$res" "$stage/$file"
         patch -s --no-backup-if-mismatch "$stage/$file" "$dir/patches/$file.patch" ||
-            { echo "$id: $file.patch doesn't apply to your stock $res (different Engine version?)" >&2; exit 1; }
+            { echo "$id: $file.patch doesn't apply to your $what $res (different version?)" >&2; exit 1; }
     done < "$WORK/qml.list"
     tar -czf "$OUT/$id-$ver.tar.gz" -C "$WORK" "$id"
     echo "built dist/$id-$ver.tar.gz"
