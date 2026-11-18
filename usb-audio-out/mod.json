@@ -1,7 +1,7 @@
 {
   "id": "usb-audio-out",
   "name": "USB Audio Out (Master to Computer)",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "author": "Jonathan Robichaud",
   "category": "audio",
   "description": "Experimental. In standalone mode, the computer on the USB-B port sees a sound card input, 'EngineX Master Out' (48 kHz stereo, from EngineX's Live Stream; set Live Stream to ON). It carries what Engine's set recorder gets (before the master volume knob) with EngineX's master effects added, using a patched EngineX hook (5.3.0.4 or 5.3.0.5); Engine restarts once when it is first enabled. Takes the USB-B port while enabled. Built for the SC LIVE 4.",

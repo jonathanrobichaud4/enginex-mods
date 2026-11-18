@@ -151,3 +151,12 @@ streaming gateway, Stems and the rest) when the preloaded file is named
 `libengine-ui-hook.so`; under 0.5.0 to 0.6.1's `libengine-ui-hook-premaster.so`
 name it loaded the UI packs only, so the USB tap never ran and EngineX's own audio
 features were off too. The status file now says `hook=usb-audio-out-0.6.2`.
+
+## 0.6.3
+
+Shares the `SC5000_UI_HOOK` line in `/data/sc5000-custom/ui-scale.env` with other mods.
+The line is now `SC5000_UI_HOOK=<hook>[:<extra library>...]`: this mod only sets or
+checks the first entry and keeps anything after a colon, so FX Channel Indicator's band
+library (2.3.0) stays loaded when the pre-master tap turns on or off. With only extra
+libraries left, the line goes back to EngineX's own hook plus those libraries instead of
+being removed.

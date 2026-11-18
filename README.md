@@ -4,8 +4,8 @@ Mods for [EngineX OS](https://github.com/Cd1s/EngineX-OS) on the Denon DJ SC LIV
 
 | Mod | Version | What it does |
 |---|---|---|
-| [USB Audio Out](usb-audio-out/) | 0.6.2 | Sends the master (before the master volume, with EngineX's master effects) to a computer on the USB-B port as a 48 kHz stereo sound card input. |
-| [FX Channel Indicator](fx-channel-indicator/) | 2.2.0 | Shows which channel the FX unit is on, blinks that channel's CUE LED, adds a band mode for the FX frequency control (LOW / MID / HIGH, combinable), and reverse jog wheel switches on 5.3.0.4. |
+| [USB Audio Out](usb-audio-out/) | 0.6.3 | Sends the master (before the master volume, with EngineX's master effects) to a computer on the USB-B port as a 48 kHz stereo sound card input. |
+| [FX Channel Indicator](fx-channel-indicator/) | 2.3.0 | Shows which channel the FX unit is on, blinks that channel's CUE LED, adds a band mode for the FX frequency control (LOW / MID / HIGH in any combination, LOW + HIGH included, green while the FX is on), and reverse jog wheel switches on 5.3.0.4. |
 | [System Stats](system-stats/) | 1.1.0 | CPU use, RAM use and CPU temperature next to the clock. |
 | [Streaming Icons](streaming-icons/) | 1.1.0 | Shows each track's real service icon (Spotify, Deezer, NetEase, SoundCloud, Beatport, Apple Music, USB/SD) in the browser and on the decks, per track, instead of TIDAL on everything EngineX plays through TIDAL. |
 | [Hardware Diagnostics](sc-diagnostics/) | 1.1.0 | A test app for the deck's hardware: controls light up as you use them, LED and pad colour tests, jog displays, tones to Main/Booth/Phones with input meters, screen patterns and a touch grid. Start it from Settings > ABOUT / UPDATE or http://<deck-ip>:8092/. Engine stops while it runs and comes back on EXIT (or hold BROWSE for 3 s). |

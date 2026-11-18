@@ -1,13 +1,15 @@
 --- a/ControlSurfaceModules/ControlSurfaceModules/private/SteppedTimeKnobOutput.qml
 +++ b/ControlSurfaceModules/ControlSurfaceModules/private/SteppedTimeKnobOutput.qml
-@@ -1,15 +1,150 @@
+@@ -1,15 +1,165 @@
  import QtQuick 2.12
 +import Planck 1.0
  
 +// Stock Engine 5.3.0 FX parameter knob (stepped encoder), plus the
 +// fx-channel-indicator mod: in "Low / Mid / High" mode (Settings > Fx), when the
 +// knob is on the Frequency parameter, each click jumps straight to the next
-+// frequency preset instead of nudging the filter (no audible sweep).
++// frequency preset instead of nudging the filter (no audible sweep). With the
++// fxbands library running (2.3.0) it steps through the band combinations instead:
++// LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL.
  QtObject {
      id: module
  
@@ -100,6 +102,13 @@
 +        } catch (e) {}
 +        return scTruthy(scSettingsNow()["simple"]) // fallback: the mod's settings file
 +    }
++    function scBandMode() {
++        try {
++            const p = Planck.getProperty("/GUI/Scripted/EngineXModFxBands")
++            if (p && p.translator) return p.translator.state === true
++        } catch (e) {}
++        return false
++    }
 +    function scFrequencyLabel() {
 +        return String(scSettingsNow()["frequencyLabel"] || "")
 +    }
@@ -113,6 +122,12 @@
 +    function scStepPreset(channel, direction) {
 +        const prop = channel.pFilterCutoff
 +        if (!prop || !prop.translator) return false
++        // Band mode (2.3.0): the FX bar keeps the frequency at its centre and picks the
++        // band combination itself; a one-step nudge tells it which way the knob went.
++        if (scBandMode()) {
++            prop.translator.value = 0.5 + direction / 124
++            return true
++        }
 +        const pos = Number(prop.translator.value)
 +        let current = -1
 +        for (let i = 0; i < scPositions.length; ++i)

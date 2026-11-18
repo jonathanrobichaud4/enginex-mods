@@ -133,3 +133,38 @@ so LOW + HIGH without MID and MID on its own can't be made: tapping HIGH while
 LOW is on also turns MID on, and a tap that would leave a gap or nothing
 changes nothing. MID on its own used to mean "> 484 Hz"; that is now MID + HIGH
 at 256 Hz.
+
+## 2.3.0: any combination of bands
+
+LOW / MID / HIGH now combine freely: LOW + HIGH with MID left dry, MID on its own,
+anything. Tap a band to switch it on or off (the last one can't go off); ALL turns on
+all three. While the FX is on, the selected bands are green; while it's off, white.
+
+The FX knob (on Frequency) steps through every combination and stops at the ends:
+
+    LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL
+
+**How.** Engine's frequency control is one filter, so it can't leave the middle dry.
+The mod now ships a small library, `lib/libfxbands.so` (source in `src/fxbands.c`),
+which Engine loads next to EngineX's hook. EngineX already wraps every FX unit's
+processing (dry block in, effected block out); the library sits in front of that wrapper,
+splits both the dry and the effected sound into three bands with Linkwitz-Riley crossovers
+at 256 Hz and 2.6 kHz (the points Engine's own frequency readout uses), and puts them back
+together with the effect only in the selected bands. Switching a band fades over 15 ms.
+With all three bands on, the effected sound passes through untouched.
+
+In band mode the frequency control stays at its centre. The selection goes to the library
+through `/tmp/enginex-fxbands` and is kept in the mod's settings file. The knob handler
+nudges the frequency one step to say which way the knob turned; the FX bar reads that,
+picks the next combination and puts the frequency back at the centre.
+
+**Loading.** `fx-bands.sh` adds the library to the `SC5000_UI_HOOK` line in
+`/data/sc5000-custom/ui-scale.env` (`<hook>:<mod>/lib/libfxbands.so`), puts it back if
+EngineX rewrites the file, and restarts Engine once if it is running without it (first
+enable). On stop it takes the library off the line. USB Audio Out 0.6.3 or later keeps
+the library on that line too; older versions overwrite it.
+
+If the library isn't running (another Engine build, or it couldn't hook in), the bar
+falls back to 2.2.0's combinations. `/tmp/enginex-fxbands.status` says whether it hooked
+in (`installed=1`). Tested in the emulator (the band split measured on Engine's own FX
+chain); not hardware-validated yet.

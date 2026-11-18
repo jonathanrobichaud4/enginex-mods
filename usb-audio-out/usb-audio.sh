@@ -234,10 +234,25 @@ engine_running() {
     [ -n "$(pidof Engine 2>/dev/null)" ]
 }
 
-# Sets (or with no argument removes) the SC5000_UI_HOOK line, keeping every other line.
+# The line is SC5000_UI_HOOK=<hook>[:<extra library>...]: the first entry is the hook
+# (ours or EngineX's), anything after a colon was added by another mod (fx-channel-indicator's
+# band library) and is kept as it is.
+hook_extras() {
+    sed -n 's/^SC5000_UI_HOOK=[^:]*//p' "$ENVFILE" 2>/dev/null | head -n 1
+}
+hook_first() {
+    sed -n 's/^SC5000_UI_HOOK=\([^:]*\).*/\1/p' "$ENVFILE" 2>/dev/null | head -n 1
+}
+
+# Sets the hook in the SC5000_UI_HOOK line (with no argument: back to EngineX's own, or no
+# line at all if nothing else is in it), keeping every other line and any extra libraries.
 set_env_hook() {
     tmp="$ENVFILE.usb-audio-out.$$"
-    { grep -v '^SC5000_UI_HOOK=' "$ENVFILE" 2>/dev/null; [ -z "$1" ] || echo "SC5000_UI_HOOK=$1"; } > "$tmp" || { rm -f "$tmp"; return 1; }
+    extras=$(hook_extras)
+    { grep -v '^SC5000_UI_HOOK=' "$ENVFILE" 2>/dev/null
+      if [ -n "$1" ]; then echo "SC5000_UI_HOOK=$1$extras"
+      elif [ -n "$extras" ]; then echo "SC5000_UI_HOOK=$HOOK$extras"; fi
+    } > "$tmp" || { rm -f "$tmp"; return 1; }
     if [ -s "$tmp" ]; then
         mv -f "$tmp" "$ENVFILE"
     else
@@ -246,7 +261,7 @@ set_env_hook() {
 }
 
 env_has_hook() {
-    grep -qx "SC5000_UI_HOOK=$HOOK_NEW" "$ENVFILE" 2>/dev/null
+    [ -n "$HOOK_NEW" ] && [ "$(hook_first)" = "$HOOK_NEW" ]
 }
 
 WATCHPID=$RUN/usb-audio-out-env.pid
@@ -271,7 +286,7 @@ watch_env() {
     [ -n "$want" ] || exit 0
     while :; do
         [ -f "$want" ] || { set_env_hook ""; exit 0; } # mod removed without a stop
-        if ! grep -qx "SC5000_UI_HOOK=$want" "$ENVFILE" 2>/dev/null; then
+        if [ "$(hook_first)" != "$want" ]; then
             HOOK_NEW=$want
             set_env_hook "$want" && log "pre-master: EngineX rewrote $ENVFILE; put the hook line back"
         fi
@@ -286,7 +301,7 @@ restart_engine_patched() {
     setsid sh -c '
         sleep 2
         i=0
-        while ! grep -qx "SC5000_UI_HOOK='"$HOOK_NEW"'" "'"$ENVFILE"'" 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
+        while ! grep -q "^SC5000_UI_HOOK='"$HOOK_NEW"'\(:\|\$\)" "'"$ENVFILE"'" 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
         systemctl restart engine
     ' < /dev/null > /dev/null 2>&1 &
 }

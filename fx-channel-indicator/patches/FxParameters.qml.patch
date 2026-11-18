@@ -1,6 +1,6 @@
 --- a/Skins/Embedded/Views/MainView/Fx/FxParameters.qml
 +++ b/Skins/Embedded/Views/MainView/Fx/FxParameters.qml
-@@ -16,6 +16,134 @@
+@@ -16,6 +16,211 @@
  
      property bool focused: false
  
@@ -40,6 +40,83 @@
 +        }
 +    }
 +    onScFreqSimpleChanged: scPublishFreqMode(scFreqSimple)
++
++    // fx-channel-indicator 2.3.0: any combination of LOW / MID / HIGH. Engine's own
++    // frequency control can't leave MID dry between LOW and HIGH, so the mod's
++    // fxbands library (loaded into Engine next to EngineX's hook) splits the sound
++    // into three bands and keeps the effect only in the chosen ones. While it runs,
++    // the frequency control stays at its centre (all bands) and the choice goes to
++    // the library through /tmp/enginex-fxbands. Without the library the bar works
++    // exactly as before (2.2.0's combinations).
++    // One shared object on the JS Math global: { ready, mask } (mask: bit 0 LOW,
++    // bit 1 MID, bit 2 HIGH). ready is also published as a Planck property
++    // (/GUI/Scripted/EngineXModFxBands) for the knob code in the controller engine.
++    function scBands() {
++        if (Math.scBands) return Math.scBands
++        let b = null
++        try {
++            b = Qt.createQmlObject('import QtQuick; QtObject { property bool ready: false; property int mask: 7 }', root, "fxBandsState")
++        } catch (e) {
++            console.warn("fx-channel-indicator: band state unavailable:", e)
++            return null
++        }
++        Math.scBands = b
++        const settings = (file, name) => {
++            try {
++                return Qt.createQmlObject('import QtCore; Settings { location: "file://' + file + '"; category: "fxbands" }', root, name)
++            } catch (e) {
++                console.warn("fx-channel-indicator: cannot open " + file + ":", e)
++                return null
++            }
++        }
++        const status = settings("/tmp/enginex-fxbands.status", "fxBandsStatus")
++        Math.scBandsOut = settings("/tmp/enginex-fxbands", "fxBandsOut")
++        const keep = Math.scBandsKeep = settings("/data/enginex/ui/mod-fx-channel-indicator.ini", "fxBandsKeep")
++        const publish = () => {
++            try {
++                if (!Math.scBandsPropMade) {
++                    Planck.createProperty("EngineXModFxBands", false, 1)
++                    Math.scBandsPropMade = true
++                }
++                const p = Planck.getProperty("/GUI/Scripted/EngineXModFxBands")
++                if (p && p.translator) p.translator.state = b.ready
++            } catch (e) {}
++        }
++        // The library says it is running in /tmp/enginex-fxbands.status; check for
++        // a minute after start (it hooks in within a second or two of Engine).
++        let tries = 0
++        const check = () => {
++            let ok = false
++            try { status.sync(); ok = String(status.value("installed", "0")) === "1" } catch (e) {}
++            if (ok) {
++                let m = 7
++                try { m = parseInt(String(keep ? keep.value("bandMask", 7) : 7)) } catch (e) {}
++                if (!(m >= 1 && m <= 7)) m = 7
++                scBandsWrite(m)
++                b.ready = true
++                publish()
++                return
++            }
++            if (++tries >= 30 || !status) { publish(); return }
++            const t = Qt.createQmlObject('import QtQuick; Timer { interval: 2000 }', root, "fxBandsRetry")
++            t.triggered.connect(() => { t.destroy(); check() })
++            t.start()
++        }
++        check()
++        return b
++    }
++    readonly property var scBandsState: scBands()
++    // Sets the band combination: the FX bars (binding on mask), the library
++    // (/tmp/enginex-fxbands) and the mod's settings (kept across restarts).
++    function scBandsWrite(m) {
++        const b = Math.scBands
++        if (!b) return
++        b.mask = m
++        for (const [s, key] of [[Math.scBandsOut, "mask"], [Math.scBandsKeep, "bandMask"]]) {
++            if (!s) continue
++            try { s.setValue(key, m); s.sync() } catch (e) {}
++        }
++    }
 +
 +    // fx-channel-indicator mod: Reverse Left / Right Jog Wheel for EngineX 5.3.0.4,
 +    // the same switches EngineX 5.3.0.5 has built in (and the same Planck
@@ -135,7 +212,7 @@
      Component {
          id: progressParameter
  
-@@ -74,6 +202,256 @@
+@@ -74,6 +279,297 @@
          }
      }
  
@@ -171,6 +248,22 @@
 +            readonly property var labels: ["LOW", "MID", "HIGH", "ALL"] // the buttons
 +            readonly property int allState: 2
 +
++            // Band mode (2.3.0, with the fxbands library): any combination, the
++            // frequency control parked at its centre. Knob order, clockwise:
++            //   LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL
++            // Must match SteppedTimeKnobOutput.qml.
++            readonly property var sb: fxParameters.scBandsState
++            readonly property bool bandMode: sb !== null && sb.ready
++            readonly property int bandMask: sb ? sb.mask : 7
++            readonly property var knobMasks: [1, 3, 2, 6, 4, 5, 7]
++            onBandModeChanged: if (bandMode && isWriter() && presetAt(positionNow()) !== allState) write(allState, true)
++            function stepBands(dir) {
++                let i = knobMasks.indexOf(bandMask)
++                if (i === -1) i = knobMasks.length - 1
++                const next = Math.max(0, Math.min(knobMasks.length - 1, i + dir))
++                if (next !== i) fxParameters.scBandsWrite(knobMasks[next])
++            }
++
 +            // The combination with these bands on, or -1 when it can't be made.
 +            function stateFor(on) {
 +                for (let s = 0; s < bands.length; ++s)
@@ -180,6 +273,7 @@
 +            // Button i lit: a band of the current combination, or ALL for all three.
 +            function buttonOn(i) {
 +                if (parameter === null) return false
++                if (bandMode) return i === 3 ? bandMask === 7 : ((bandMask >> i) & 1) === 1
 +                const s = onPreset(positionNow())
 +                if (s === -1) return false
 +                return i === 3 ? s === allState : bands[s][i] === 1
@@ -188,6 +282,15 @@
 +            // MID when LOW and HIGH would otherwise be apart, or takes it away again.
 +            // A tap that would leave nothing, or a gap (MID out of ALL), changes nothing.
 +            function tapButton(i) {
++                if (bandMode) {
++                    // Any combination: a band button switches that band on or off
++                    // (the last one can't go off); ALL switches all three on.
++                    const m = i === 3 ? 7 : (bandMask ^ (1 << i))
++                    if (m === 0) return
++                    if (m !== bandMask) fxParameters.scBandsWrite(m)
++                    if (presetAt(positionNow()) !== allState) write(allState, true)
++                    return
++                }
 +                if (i === 3) { write(allState, true); return }
 +                const s = onPreset(positionNow())
 +                const on = s === -1 ? [0, 0, 0] : bands[s].slice()
@@ -290,6 +393,7 @@
 +                landed = positionNow()
 +                target = presetAt(landed)
 +                isWriter()
++                if (bandMode && isWriter() && target !== allState) write(allState, true)
 +                if (parameter && parameter.label && fxParameters.scFreqStore)
 +                    fxParameters.scFreqStore.frequencyLabel = parameter.label
 +            }
@@ -307,6 +411,20 @@
 +                if (awaitingEcho && Math.abs(pos - writtenPos) < 2 / 124) {
 +                    awaitingEcho = false
 +                    echoPos = pos
++                    return
++                }
++                if (bandMode) {
++                    // The frequency control stays at the centre. A move away from it
++                    // is a knob click (the controller code nudges it one step): step
++                    // to the next combination, at most once per 120 ms, and centre it.
++                    if (presetAt(pos) === allState) { target = allState; return }
++                    if (!isWriter()) return
++                    const now = Date.now()
++                    if (now - lastStep >= 120) {
++                        lastStep = now
++                        stepBands(pos > 0.5 ? 1 : -1)
++                    }
++                    write(allState)
 +                    return
 +                }
 +                const on = onPreset(pos)
@@ -347,11 +465,11 @@
 +                        width: 56
 +                        height: parent.height
 +                        radius: 4
-+                        // No green here: the selected preset is white, so green
-+                        // stays reserved for the dot and the FX-on channel readout.
-+                        color: selected ? "white" : "transparent"
++                        // Selected bands are green while the FX is on, white while it's off.
++                        readonly property color litColor: fxParameters.focused ? Style.active01Color : "white"
++                        color: selected ? litColor : "transparent"
 +                        border.width: 1
-+                        border.color: selected ? "white" : Style.disabled01Color
++                        border.color: selected ? litColor : Style.disabled01Color
 +
 +                        Text {
 +                            anchors.centerIn: parent
@@ -392,7 +510,7 @@
      Component {
          id: patternParameter
  
-@@ -115,7 +493,7 @@
+@@ -115,7 +611,7 @@
                      case EmbeddedDJFxParameterInterface.Label:
                          return textParameter
                      case EmbeddedDJFxParameterInterface.Bipolar:
