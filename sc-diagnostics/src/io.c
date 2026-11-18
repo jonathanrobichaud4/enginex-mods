@@ -45,8 +45,9 @@ int touch_open(void) {
     if (emu()) {
         const char *p = getenv("EMU_INPUT");
         if (!p) p = "/tmp/emu/input";
-        unlink(p);
-        if (mkfifo(p, 0666) && errno != EEXIST) return -1;
+        struct stat st;
+        /* reuse the emulator's pipe (replacing it would leave Engine reading a deleted one) */
+        if (stat(p, &st) || !S_ISFIFO(st.st_mode)) { unlink(p); if (mkfifo(p, 0666) && errno != EEXIST) return -1; }
         touch_fd = open(p, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         emu_touch_keep = open(p, O_WRONLY | O_NONBLOCK | O_CLOEXEC); /* never see EOF */
         snprintf(tname, sizeof tname, "emulator input pipe");
