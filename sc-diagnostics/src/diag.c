@@ -34,7 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define VERSION "1.0.1"
+#define VERSION "1.0.2"
 enum { T_BTN, T_PAD, T_KNOB, T_FADER, T_XFADER, T_ENC, T_JOG, T_PITCH, T_SW, T_SEL, T_VU };
 
 static const uint32_t BG = 0xFF0D0F12, PANEL = 0xFF16191D, IDLE = 0xFF2B2F35, LINE_C = 0xFF3A3F46,
@@ -379,8 +379,8 @@ static void draw_audio(void) {
 }
 
 /* ---- SCREEN ---- */
-enum { NPAT = 9 };
-static const char *PATS[NPAT] = {"RED", "GREEN", "BLUE", "WHITE", "BLACK", "GREY RAMP", "COLOUR BARS", "CHECKER", "GRID"};
+enum { NPAT = 8 };
+static const char *PATS[NPAT] = {"RED", "GREEN", "BLUE", "WHITE", "BLACK", "GREY RAMP", "COLOUR BARS", "CHECKER"};
 static int pattern = -1;
 static void draw_pattern(int p) {
     static const uint32_t solid[] = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFFFF, 0xFF000000};
@@ -391,12 +391,7 @@ static void draw_pattern(int p) {
         for (int i = 0; i < 8; i++) fill(i * CW / 8, 0, CW / 8 + 1, CH, bars[i]);
         return;
     }
-    if (p == 7) { for (int y = 0; y < CH; y++) for (int x = 0; x < CW; x++) canvas[y * CW + x] = ((x ^ y) & 1) ? 0xFFFFFFFF : 0xFF000000; return; }
-    fill(0, 0, CW, CH, 0xFF000000);
-    /* 2 px lines every 40 px, plus the outer edge: 1 px lines shimmer on the deck's LCD */
-    for (int x = 0; x < CW; x += 40) fill(x, 0, 2, CH, 0xFFFFFFFF);
-    for (int y = 0; y < CH; y += 40) fill(0, y, CW, 2, 0xFFFFFFFF);
-    frame(0, 0, CW, CH, 2, 0xFFFFFFFF);
+    if (p == 7) { for (int y = 0; y < CH; y++) for (int x = 0; x < CW; x++) canvas[y * CW + x] = ((x ^ y) & 1) ? 0xFFFFFFFF : 0xFF000000; }
 }
 static void draw_screen_page(void) {
     text(40, TAB_H + 24, FL, TXT, "Screen");
