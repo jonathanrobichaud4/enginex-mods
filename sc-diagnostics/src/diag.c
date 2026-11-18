@@ -34,7 +34,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define VERSION "1.0.2"
+#define VERSION "1.1.0"
 enum { T_BTN, T_PAD, T_KNOB, T_FADER, T_XFADER, T_ENC, T_JOG, T_PITCH, T_SW, T_SEL, T_VU };
 
 static const uint32_t BG = 0xFF0D0F12, PANEL = 0xFF16191D, IDLE = 0xFF2B2F35, LINE_C = 0xFF3A3F46,
@@ -332,12 +332,17 @@ static void draw_lights(void) {
 }
 
 /* ---- AUDIO ---- */
+enum { NLEVELS = 5 };
+static const double LEVELS[NLEVELS] = {-36, -24, -18, -12, -6};
 static void audio_action(int id) {
     static const int masks[] = {0x01, 0x02, 0x03, 0x04, 0x08, 0x0C, 0x10, 0x20, 0x30, 0x40, 0x80, 0xFF};
     static const double hzs[] = {100, 440, 1000, 5000, 0};
     if (id >= 30 && id < 42) audio_tone(audio_tone_mask() == masks[id - 30] ? 0 : masks[id - 30], audio_tone_hz());
     else if (id == 42) audio_tone(0, audio_tone_hz());
     else if (id >= 50 && id < 55) audio_tone(audio_tone_mask(), hzs[id - 50]);
+    else if (id == 80) audio_set_level(audio_level() - 3);
+    else if (id == 81) audio_set_level(audio_level() + 3);
+    else if (id >= 82 && id < 82 + NLEVELS) audio_set_level(LEVELS[id - 82]);
 }
 
 static void draw_audio(void) {
@@ -348,7 +353,7 @@ static void draw_audio(void) {
         text(40, TAB_H + 80, FM, WARN, "No audio device. The codec may still be in use; check that Engine is stopped.");
         return;
     }
-    text(40, TAB_H + 74, FS, DIM, "Turn the deck's level knobs down first. Tones play at -12 dBFS straight into the codec, before any of Engine's mixing.");
+    text(40, TAB_H + 74, FS, DIM, "Start low. Tones go straight into the codec, so the deck's volume knobs don't change them; set the level here.");
     char b[200];
     snprintf(b, sizeof b, "Device: %s", audio_name());
     text(40, TAB_H + 94, FS, DIM, b);
@@ -361,13 +366,25 @@ static void draw_audio(void) {
     static const char *hz[] = {"100 Hz", "440 Hz", "1 kHz", "5 kHz", "SWEEP"};
     static const double hv[] = {100, 440, 1000, 5000, 0};
     for (int i = 0; i < 5; i++) button(242 + i * 202, TAB_H + 280, 186, 56, hz[i], fabs(audio_tone_hz() - hv[i]) < 0.5, 50 + i);
-    text(40, TAB_H + 360, FM, TXT, "Inputs");
+    /* level: - / readout / + and quick presets */
+    int ly = TAB_H + 350;
+    double lv = audio_level();
+    button(40, ly, 86, 56, "-", 0, 80);
+    fill_round(134, ly, 150, 56, 8, PANEL);
+    snprintf(b, sizeof b, "%.0f dB", lv);
+    text_c(134 + 75, ly + 16, FM, TXT, b);
+    button(292, ly, 86, 56, "+", 0, 81);
+    for (int i = 0; i < NLEVELS; i++) {
+        snprintf(b, sizeof b, "%.0f dB", LEVELS[i]);
+        button(402 + i * 172, ly, 158, 56, b, fabs(lv - LEVELS[i]) < 0.5, 82 + i);
+    }
+    text(40, TAB_H + 430, FM, TXT, "Inputs");
     int n = audio_in_channels();
-    if (!n) { text(150, TAB_H + 362, FS, DIM, "no capture device"); return; }
-    text(150, TAB_H + 364, FS, DIM, "Plug a source into the mic and aux inputs; each input channel shows its peak level.");
+    if (!n) { text(150, TAB_H + 432, FS, DIM, "no capture device"); return; }
+    text(150, TAB_H + 434, FS, DIM, "Plug a source into the mic and aux inputs; each input channel shows its peak level.");
     for (int c = 0; c < n && c < 8; c++) {
         double db = audio_in_level(c);
-        int y = TAB_H + 396 + c * 38, w = CW - 260;
+        int y = TAB_H + 466 + c * 38, w = CW - 260;
         snprintf(b, sizeof b, "IN %d", c + 1);
         text(40, y + 4, FM, TXT, b);
         fill_round(120, y, w, 26, 6, PANEL);
@@ -484,7 +501,7 @@ static void tap(int x, int y) {
             else page = p;
         } else if (id == 1) { for (int k = 0; k < NCTLS; k++) { cs[k].seen = 0; cs[k].count = 0; } snprintf(last_msg, sizeof last_msg, "Cleared."); }
         else if (id >= 10 && id < 20) lights_action(id);
-        else if (id >= 30 && id < 55) audio_action(id);
+        else if ((id >= 30 && id < 55) || (id >= 80 && id < 90)) audio_action(id);
         else if (id >= 60 && id < 60 + NPAT) pattern = id - 60;
         else if (id == 69) pattern = pattern + 1 < NPAT ? pattern + 1 : -1;
         else if (id == 70) memset(grid, 0, sizeof grid);

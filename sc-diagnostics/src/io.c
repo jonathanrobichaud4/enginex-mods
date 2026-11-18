@@ -288,6 +288,7 @@ static snd_pcm_t *pout, *pin;
 static unsigned out_ch = 8, in_ch = 2, rate = 44100;
 static volatile int tone_mask, run_audio;
 static volatile double tone_hz = 1000;
+static volatile double tone_db = -24;   /* tone level in dBFS, set from the Audio page */
 static volatile double in_db[16];
 static pthread_t th_out, th_in;
 
@@ -295,6 +296,8 @@ const char *audio_name(void) { return aname; }
 void audio_tone(int mask, double hz) { tone_hz = hz; tone_mask = mask; }
 int audio_tone_mask(void) { return tone_mask; }
 double audio_tone_hz(void) { return tone_hz; }
+void audio_set_level(double db) { tone_db = db < -60 ? -60 : (db > 0 ? 0 : db); }
+double audio_level(void) { return tone_db; }
 int audio_in_channels(void) { return audio_in_ok ? (int)in_ch : 0; }
 double audio_in_level(int ch) { return ch >= 0 && ch < 16 ? in_db[ch] : -100; }
 
@@ -322,8 +325,9 @@ static void *out_thread(void *a) {
     (void)a;
     enum { F = 512 };
     static int32_t buf[F * 16];
-    double ph = 0, sweep = 0;
+    double ph = 0, sweep = 0, gain = 0;
     while (run_audio) {
+        const double want = pow(10, tone_db / 20);
         int mask = tone_mask;
         double hz = tone_hz;
         for (int i = 0; i < F; i++) {
@@ -331,7 +335,8 @@ static void *out_thread(void *a) {
             if (hz <= 0) { sweep += 8.0 / (8.0 * rate); if (sweep > 8) sweep = 0; }
             ph += 2 * M_PI * f / rate;
             if (ph > 2 * M_PI) ph -= 2 * M_PI;
-            int32_t v = (int32_t)(sin(ph) * 0.25 * 2147483647.0); /* -12 dBFS */
+            gain += (want - gain) * 0.002;   /* level changes glide over ~10 ms, no clicks */
+            int32_t v = (int32_t)(sin(ph) * gain * 2147483647.0);
             for (unsigned c = 0; c < out_ch; c++) buf[i * out_ch + c] = (mask >> c) & 1 ? v : 0;
         }
         snd_pcm_sframes_t w = snd_pcm_writei(pout, buf, F);

@@ -26,6 +26,8 @@ extern int midi_fd;                /* for poll(); -1 if none */
 int audio_open(void);              /* starts the audio threads; 0 ok */
 void audio_close(void);
 const char *audio_name(void);
+void audio_set_level(double db); /* tone level, dBFS (-60 to 0) */
+double audio_level(void);
 void audio_tone(int mask, double hz); /* mask: bit per output channel, 0 = silence; hz 0 = sweep */
 int audio_tone_mask(void);
 double audio_tone_hz(void);
