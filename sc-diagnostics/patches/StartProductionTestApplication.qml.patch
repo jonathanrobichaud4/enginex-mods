@@ -1,0 +1,24 @@
+--- StartProductionTestApplication.qml
++++ StartProductionTestApplication.qml
+@@ -2,11 +2,18 @@
+ import Planck 1.0
+ import "../../Entries/Base"
+ 
++// sc-diagnostics: this entry starts the Hardware Diagnostics app instead of inMusic's
++// signed production test (which the deck refuses to run). The mod's launcher, listening on
++// port 8092, stops Engine, runs the app, and starts Engine again when it is closed.
+ PrefsConditionalEntry {
+-    active: Planck.isRadxa()
++    active: true
+     sourceComponent: PrefsButtonEntry {
+-        text: "Start Production Test Application"
++        text: "Hardware Diagnostics"
+         buttonText: (Math.scI18n ? Math.scI18n.t("Start") : "Start")
+-        onClicked: Planck.quit(QuitReasons.TestApp)
++        onClicked: {
++            var x = new XMLHttpRequest()
++            x.open("POST", "http://127.0.0.1:8092/start")
++            x.send("")
++        }
+     }
+ }

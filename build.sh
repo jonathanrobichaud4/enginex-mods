@@ -32,7 +32,7 @@ for dir in "$HERE"/*/; do
     stage=$WORK/$id
     mkdir -p "$stage"
     # everything but the patches goes in as is
-    (cd "$dir" && find . -path ./patches -prune -o -type f -print) | while read -r f; do
+    (cd "$dir" && find . \( -path ./patches -o -path ./src \) -prune -o -type f -print) | while read -r f; do
         mkdir -p "$stage/$(dirname "$f")"
         cp -p "$dir/$f" "$stage/$f"
     done

@@ -1,0 +1,18 @@
+--- AboutTabContent.qml
++++ AboutTabContent.qml
+@@ -3,6 +3,7 @@
+ import "Entries"
+ import "Entries/Base"
+ import "Base"
++import "Advanced/Entries" as Diag   // sc-diagnostics
+ 
+ FlickableTabContent {
+     visible: true
+@@ -17,6 +18,7 @@
+             width: 1
+             height: 16
+         },
++        Diag.StartProductionTestApplication {},   // sc-diagnostics: Hardware Diagnostics
+         Analytics {},
+         Legal {},
+         GatherDebugInformation {},

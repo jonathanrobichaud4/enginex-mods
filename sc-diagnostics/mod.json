@@ -1,0 +1,13 @@
+{
+  "id": "sc-diagnostics",
+  "name": "Hardware Diagnostics",
+  "version": "1.0.0",
+  "author": "Jonathan Robichaud",
+  "category": "tools",
+  "description": "A hardware test app for the SC LIVE 4. Start it from Settings > ABOUT / UPDATE > Hardware Diagnostics (it also replaces Start Production Test Application in the hidden Advanced tab) or from http://<deck-ip>:8092/ in a browser. Engine stops while it runs. Pages: Controls (every button, pad, knob, fader, jog and encoder lights up as you use it), Lights (all LEDs, pad colours, meters, jog displays), Audio (tones to Main, Booth and Phones, input meters), Screen (colour and pixel patterns) and Touch (a grid that fills in where you touch). EXIT or hold BROWSE for 3 seconds to go back to Engine. Built for EngineX OS 5.3.0.4.",
+  "qmlFiles": {
+    "AboutTabContent.qml": "Skins/Embedded/Views/ControlCenter/Tabs/Preferences/AboutTabContent.qml",
+    "StartProductionTestApplication.qml": "Skins/Embedded/Views/ControlCenter/Tabs/Preferences/Advanced/Entries/StartProductionTestApplication.qml"
+  },
+  "script": "sc-diagnostics.sh"
+}
