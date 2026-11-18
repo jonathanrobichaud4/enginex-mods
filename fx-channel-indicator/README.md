@@ -140,15 +140,16 @@ LOW / MID / HIGH now combine freely: LOW + HIGH with MID left dry, MID on its ow
 anything. Tap a band to switch it on or off (the last one can't go off); ALL turns on
 all three. While the FX is on, the selected bands are green; while it's off, white.
 
-The FX knob (on Frequency) steps through every combination and stops at the ends:
+The FX knob (on Frequency) steps through every combination and stops at the ends
+(2.3.1 adds none at the start, see below):
 
     LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL
 
 **How.** Engine's frequency control is one filter, so it can't leave the middle dry.
 The mod now ships a small library, `lib/libfxbands.so` (source in `src/fxbands.c`),
-which Engine loads next to EngineX's hook. EngineX already wraps every FX unit's
-processing (dry block in, effected block out); the library sits in front of that wrapper,
-splits both the dry and the effected sound into three bands with Linkwitz-Riley crossovers
+which Engine loads next to EngineX's hook. It hooks the FX unit's own process function
+(dry block in, finished block out), keeps a copy of the dry input,
+splits both the dry and the finished sound into three bands with Linkwitz-Riley crossovers
 at 256 Hz and 2.6 kHz (the points Engine's own frequency readout uses), and puts them back
 together with the effect only in the selected bands. Switching a band fades over 15 ms.
 With all three bands on, the effected sound passes through untouched.
@@ -168,3 +169,19 @@ If the library isn't running (another Engine build, or it couldn't hook in), the
 falls back to 2.2.0's combinations. `/tmp/enginex-fxbands.status` says whether it hooked
 in (`installed=1`). Tested in the emulator (the band split measured on Engine's own FX
 chain); not hardware-validated yet.
+
+## 2.3.1: the bands actually apply; none selected
+
+2.3.0's library sat on the FX chain function EngineX wraps, which turned out to see the
+sound after the effect had already been mixed in: it put "effected" bands back over
+"effected" bands, so every band always sounded on. 2.3.1 hooks the FX unit's own process
+function instead (Engine 5.3.0 for SC LIVE 4 has three versions of it, at 0xe78008,
+0xe78130 and 0xe9f73c), whose input is the clean channel signal; measured on an echo tail
+in the emulator, unselected bands now drop by 22 to 37 dB. It no longer depends on
+EngineX's FX hook. FX units that are idle (output equal to input) are left alone.
+
+Every band can be switched off now: tap the last lit band, or tap ALL when all three are
+on. With none selected the effect isn't heard (it keeps running, so its tail comes back
+with the first band). The knob order starts at none:
+
+    none, LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL

@@ -91,7 +91,7 @@
 +            if (ok) {
 +                let m = 7
 +                try { m = parseInt(String(keep ? keep.value("bandMask", 7) : 7)) } catch (e) {}
-+                if (!(m >= 1 && m <= 7)) m = 7
++                if (!(m >= 0 && m <= 7)) m = 7
 +                scBandsWrite(m)
 +                b.ready = true
 +                publish()
@@ -212,7 +212,7 @@
      Component {
          id: progressParameter
  
-@@ -74,6 +279,297 @@
+@@ -74,6 +279,298 @@
          }
      }
  
@@ -250,12 +250,13 @@
 +
 +            // Band mode (2.3.0, with the fxbands library): any combination, the
 +            // frequency control parked at its centre. Knob order, clockwise:
-+            //   LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL
-+            // Must match SteppedTimeKnobOutput.qml.
++            //   none, LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL
++            // (none: no band selected, the effect isn't heard). Must match
++            // SteppedTimeKnobOutput.qml.
 +            readonly property var sb: fxParameters.scBandsState
 +            readonly property bool bandMode: sb !== null && sb.ready
 +            readonly property int bandMask: sb ? sb.mask : 7
-+            readonly property var knobMasks: [1, 3, 2, 6, 4, 5, 7]
++            readonly property var knobMasks: [0, 1, 3, 2, 6, 4, 5, 7]
 +            onBandModeChanged: if (bandMode && isWriter() && presetAt(positionNow()) !== allState) write(allState, true)
 +            function stepBands(dir) {
 +                let i = knobMasks.indexOf(bandMask)
@@ -283,10 +284,10 @@
 +            // A tap that would leave nothing, or a gap (MID out of ALL), changes nothing.
 +            function tapButton(i) {
 +                if (bandMode) {
-+                    // Any combination: a band button switches that band on or off
-+                    // (the last one can't go off); ALL switches all three on.
-+                    const m = i === 3 ? 7 : (bandMask ^ (1 << i))
-+                    if (m === 0) return
++                    // Any combination: a band button switches that band on or off,
++                    // down to none; ALL switches all three on, or all off when they
++                    // already are.
++                    const m = i === 3 ? (bandMask === 7 ? 0 : 7) : (bandMask ^ (1 << i))
 +                    if (m !== bandMask) fxParameters.scBandsWrite(m)
 +                    if (presetAt(positionNow()) !== allState) write(allState, true)
 +                    return
@@ -510,7 +511,7 @@
      Component {
          id: patternParameter
  
-@@ -115,7 +611,7 @@
+@@ -115,7 +612,7 @@
                      case EmbeddedDJFxParameterInterface.Label:
                          return textParameter
                      case EmbeddedDJFxParameterInterface.Bipolar:

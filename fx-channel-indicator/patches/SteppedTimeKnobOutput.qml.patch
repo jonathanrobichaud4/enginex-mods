@@ -9,7 +9,7 @@
 +// knob is on the Frequency parameter, each click jumps straight to the next
 +// frequency preset instead of nudging the filter (no audible sweep). With the
 +// fxbands library running (2.3.0) it steps through the band combinations instead:
-+// LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL.
++// none, LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL.
  QtObject {
      id: module
  

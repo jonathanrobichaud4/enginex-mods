@@ -3,34 +3,40 @@
  *
  * Engine's FX frequency control is one filter, so it can put the effect on the lows,
  * the highs, or one side of a cutoff, but never on LOW + HIGH with MID left dry.
- * This library is preloaded into Engine after EngineX's hook. EngineX already wraps
- * every FX unit's processing (hook_fx_common_chain: dry block in, effected block out);
- * fxbands sits in front of that wrapper, splits the dry and the effected signal into
- * three bands with Linkwitz-Riley crossovers (256 Hz and 2.6 kHz, the points Engine's
- * own frequency readout uses) and puts them back together with the effect only in the
- * bands that are switched on:
+ * This library is preloaded into Engine (after EngineX's hook) and hooks the FX unit's
+ * own process function: (unit, dry in, out, frames). That function runs the effect
+ * into the unit's wet buffers and mixes it with the dry input into out (dry + (wet -
+ * dry) * amount, or dry + wet * amount; Engine has three versions of it). fxbands keeps
+ * a copy of the dry input, lets the function run, then splits both the dry and the
+ * finished sound into three bands with Linkwitz-Riley crossovers (256 Hz and 2.6 kHz,
+ * the points Engine's own frequency readout uses) and rebuilds the output with the
+ * finished sound only in the selected bands:
  *
- *     out = sum over bands b of  (on_b ? band_b(wet) : band_b(dry))
+ *     out = sum over bands b of  (on_b ? band_b(finished) : band_b(dry))
  *
+ * Units whose output equals their input (Engine keeps several, most idle) are left alone.
  * Each band fades over 15 ms when it is switched. With all three bands on (or no
- * selection file) the effected block passes through untouched, so stock behaviour and
- * the slider mode are exactly as before.
+ * selection file) the unit's output passes through untouched; with none on, only the
+ * dry sound is left (the effect keeps running, so its tail is there again when a band
+ * comes back).
  *
  * The selection comes from /tmp/enginex-fxbands, an INI file with "mask=N" (bit 0 LOW,
- * bit 1 MID, bit 2 HIGH) written by the FX bar (fx-channel-indicator mod). A thread
- * checks it every 10 ms. Status goes to /tmp/enginex-fxbands.status, also INI
+ * bit 1 MID, bit 2 HIGH, 0 = none) written by the FX bar (fx-channel-indicator mod).
+ * A thread checks it every 10 ms. Status goes to /tmp/enginex-fxbands.status, also INI
  * ([fxbands] installed=1 ...), which is how the FX bar knows band mode is available.
  *
- * Installation: EngineX patches the entry of Engine's FX chain function with
- * "ldr pc, [pc, #-4]; .word hook". That word is read as data, so fxbands replaces it
- * with its own function (keeping EngineX's as the one it calls) with a single aligned
- * store; there is no moment where the entry is half written. If the entry isn't
- * EngineX's jump (another Engine build, or EngineX's DSP hooks not installed), fxbands
- * does nothing.
+ * Installation: in the constructor, before Engine starts any threads, each of the three
+ * functions gets "ldr pc, [pc, #-4]; .word hook" at its entry, but only if the entry
+ * still holds the two expected instructions (moved to a small trampoline). Only Engine
+ * 5.3.0 for SC LIVE 4 (checked by GNU build ID) is touched.
+ *
+ * Debug ("test=N" in the selection file): 1 = finished sound replaced by silence (checks
+ * the split), 2 = output the unit's dry input, 3 = per-unit levels in the status file.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <elf.h>
+#include <fcntl.h>
 #include <link.h>
 #include <math.h>
 #include <pthread.h>
@@ -38,25 +44,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <unistd.h>
 
 #define MASK_FILE "/tmp/enginex-fxbands"
 #define STATUS_FILE "/tmp/enginex-fxbands.status"
 #define ALL 7
 
-typedef void (*chain_fn)(void *, float *const *, float *const *, uint32_t);
+typedef void (*unit_fn)(void *, float *const *, float *const *, uint32_t);
 
-/* Engine 5.3.0 for SC LIVE 4 (GNU build ID) and its FX chain function. */
+/* Engine 5.3.0 for SC LIVE 4 (GNU build ID) and its FX unit process functions. */
 static const unsigned char build_sclive4[20] = {0xb9, 0x46, 0xc3, 0xb8, 0xd9, 0x9d, 0x32, 0x99, 0x8c, 0x81,
                                                 0x97, 0xd5, 0xdc, 0x90, 0x5a, 0x6b, 0xdd, 0xaa, 0x5d, 0x2f};
-static const uint32_t chain_offset = 0x172e668;
+#define NUNITS 3
+static const uint32_t unit_offsets[NUNITS] = {0xe78008, 0xe78130, 0xe9f73c};
+static const uint32_t unit_prologue[2] = {0xe16d42f4, 0xe1cd60f8}; /* strd r4,[sp,#-36]! ; strd r6,[sp,#8] */
+static unit_fn unit_orig[NUNITS]; /* trampolines: the two moved instructions, then the rest */
 
-static chain_fn next_chain;      /* EngineX's hook_fx_common_chain */
-static volatile int g_mask = ALL; /* written by the poll thread */
-static volatile int g_wet_only_test; /* "test=1" in the file: wet replaced by silence (for checking the split) */
+static uintptr_t engine_base;
+static volatile int g_mask = ALL;
+static volatile int g_test;
 static float g_rate = 44100.0f;
 static uint32_t g_blocks, g_band_blocks;
 static int g_installed;
@@ -83,6 +91,10 @@ static coef_t butter(float fc, float rate, int high) {
     return c;
 }
 static coef_t lp1, hp1, lp2, hp2; /* crossover 1 (256 Hz) and 2 (2.6 kHz) */
+static void make_filters(float rate) {
+    lp1 = butter(256, rate, 0); hp1 = butter(256, rate, 1);
+    lp2 = butter(2600, rate, 0); hp2 = butter(2600, rate, 1);
+}
 
 /* One signal's 3-band split: 12 biquads. The low band also goes through the second
  * crossover (low+high of it, an all-pass) so all three bands line up in phase. */
@@ -99,25 +111,26 @@ static void split(split_t *p, float x, float out[3]) {
 #define SLOTS 16
 #define MAXF 4096
 typedef struct {
-    void *common;          /* which FX chain this slot belongs to (0 = free) */
-    int busy;              /* taken by an audio thread right now */
+    void *unit;    /* which FX unit this slot belongs to (0 = free) */
+    int busy;      /* taken by an audio thread right now */
     split_t dry[2], wet[2];
-    float gain[3];         /* current band gains, 0 = dry, 1 = effected */
-    float engaged;         /* 0 = pass the effected block through untouched, 1 = band mix */
+    float gain[3]; /* current band gains, 0 = dry, 1 = finished */
+    float engaged; /* 0 = pass the unit's output through untouched, 1 = band mix */
     float dl[MAXF], dr[MAXF];
+    uint32_t calls, frames_seen, variant; double e_in, e_out; /* test=3 */
 } slot_t;
 static slot_t slots[SLOTS];
 
-static slot_t *slot_enter(void *common) {
+static slot_t *slot_enter(void *unit) {
     for (int i = 0; i < SLOTS; i++)
-        if (__atomic_load_n(&slots[i].common, __ATOMIC_ACQUIRE) == common) {
+        if (__atomic_load_n(&slots[i].unit, __ATOMIC_ACQUIRE) == unit) {
             int z = 0;
             return __atomic_compare_exchange_n(&slots[i].busy, &z, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED) ? &slots[i] : NULL;
         }
     for (int i = 0; i < SLOTS; i++) {
         void *none = NULL;
-        if (__atomic_load_n(&slots[i].common, __ATOMIC_RELAXED) == NULL &&
-            __atomic_compare_exchange_n(&slots[i].common, &none, common, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+        if (__atomic_load_n(&slots[i].unit, __ATOMIC_RELAXED) == NULL &&
+            __atomic_compare_exchange_n(&slots[i].unit, &none, unit, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
             int z = 0;
             if (!__atomic_compare_exchange_n(&slots[i].busy, &z, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return NULL;
             slot_t *s = &slots[i];
@@ -128,24 +141,38 @@ static slot_t *slot_enter(void *common) {
     }
     return NULL;
 }
-static void slot_exit(slot_t *s) { if (s) __atomic_store_n(&s->busy, 0, __ATOMIC_RELEASE); }
+static void slot_exit(slot_t *s) { __atomic_store_n(&s->busy, 0, __ATOMIC_RELEASE); }
 
-static void fxbands_chain(void *common, float *const *in, float *const *out, uint32_t frames) {
+static void fxbands_unit(int k, void *unit, float *const *in, float *const *out, uint32_t frames) {
+    unit_fn next = unit_orig[k];
     __atomic_fetch_add(&g_blocks, 1, __ATOMIC_RELAXED);
-    int mask = __atomic_load_n(&g_mask, __ATOMIC_RELAXED);
-    slot_t *s = (in && out && in[0] && in[1] && out[0] && out[1] && frames && frames <= MAXF) ? slot_enter(common) : NULL;
-    if (!s) { next_chain(common, in, out, frames); return; }
+    int mask = __atomic_load_n(&g_mask, __ATOMIC_RELAXED), test = g_test;
+    slot_t *s = (in && out && in[0] && in[1] && out[0] && out[1] && frames && frames <= MAXF) ? slot_enter(unit) : NULL;
+    if (!s) { next(unit, in, out, frames); return; }
     /* Nothing to do and nothing fading: plain pass-through (the filters rest). */
-    if (mask == ALL && s->engaged == 0.0f) { slot_exit(s); next_chain(common, in, out, frames); return; }
-    if (s->engaged == 0.0f) { memset(s->dry, 0, sizeof s->dry); memset(s->wet, 0, sizeof s->wet); } /* fresh start, no stale tails */
+    if (mask == ALL && s->engaged == 0.0f && !test) { slot_exit(s); next(unit, in, out, frames); return; }
+    if (s->engaged == 0.0f) { memset(s->dry, 0, sizeof s->dry); memset(s->wet, 0, sizeof s->wet); } /* no stale tails */
     memcpy(s->dl, in[0], frames * sizeof(float)); /* in and out may be the same buffers */
     memcpy(s->dr, in[1], frames * sizeof(float));
-    next_chain(common, in, out, frames);
+    next(unit, in, out, frames);
+    if (test == 3) {
+        double ei = 0, eo = 0;
+        for (uint32_t i = 0; i < frames; i++) { ei += s->dl[i] * s->dl[i]; eo += out[0][i] * out[0][i]; }
+        s->calls++; s->frames_seen = frames; s->variant = (uint32_t)k; s->e_in += ei; s->e_out += eo;
+        slot_exit(s); return;
+    }
+    if (test == 2) {
+        memcpy(out[0], s->dl, frames * sizeof(float)); memcpy(out[1], s->dr, frames * sizeof(float));
+        slot_exit(s); return;
+    }
+    /* Engine keeps several FX units; the idle ones hand their input straight back. Leave
+       those alone (no filtering, no phase shift), fading out if one just went idle. */
+    int active = memcmp(out[0], s->dl, frames * sizeof(float)) || memcmp(out[1], s->dr, frames * sizeof(float));
+    if (!active && s->engaged == 0.0f) { slot_exit(s); return; }
     __atomic_fetch_add(&g_band_blocks, 1, __ATOMIC_RELAXED);
     const float step = 1.0f / (0.015f * g_rate); /* 15 ms fades */
     float target[3] = {(float)(mask & 1), (float)((mask >> 1) & 1), (float)((mask >> 2) & 1)};
-    float eng_target = mask == ALL ? 0.0f : 1.0f;
-    int test = g_wet_only_test;
+    float eng_target = (mask == ALL || !active) ? 0.0f : 1.0f;
     for (uint32_t i = 0; i < frames; i++) {
         for (int b = 0; b < 3; b++) {
             if (s->gain[b] < target[b]) { s->gain[b] += step; if (s->gain[b] > target[b]) s->gain[b] = target[b]; }
@@ -155,7 +182,7 @@ static void fxbands_chain(void *common, float *const *in, float *const *out, uin
         else if (s->engaged > eng_target) { s->engaged -= step; if (s->engaged < 0) s->engaged = 0; }
         for (int ch = 0; ch < 2; ch++) {
             float x = ch ? s->dr[i] : s->dl[i];
-            float w = test ? 0.0f : out[ch][i];
+            float w = test == 1 ? 0.0f : out[ch][i];
             float db[3], wb[3];
             split(&s->dry[ch], x, db);
             split(&s->wet[ch], w, wb);
@@ -167,6 +194,10 @@ static void fxbands_chain(void *common, float *const *in, float *const *out, uin
     }
     slot_exit(s);
 }
+static void unit0(void *u, float *const *i, float *const *o, uint32_t f) { fxbands_unit(0, u, i, o, f); }
+static void unit1(void *u, float *const *i, float *const *o, uint32_t f) { fxbands_unit(1, u, i, o, f); }
+static void unit2(void *u, float *const *i, float *const *o, uint32_t f) { fxbands_unit(2, u, i, o, f); }
+static unit_fn const unit_hooks[NUNITS] = {unit0, unit1, unit2};
 
 /* ------------------------------------------------------------------ selection and status */
 static void read_mask(void) {
@@ -178,20 +209,28 @@ static void read_mask(void) {
         close(fd);
         if (n > 0) {
             char *m = strstr(buf, "mask=");
-            if (m) { int v = atoi(m + 5); if (v >= 1 && v <= 7) mask = v; }
+            if (m) { int v = atoi(m + 5); if (v >= 0 && v <= 7) mask = v; }
             char *t = strstr(buf, "test=");
-            if (t) test = atoi(t + 5) == 1;
+            if (t) test = atoi(t + 5);
             char *r = strstr(buf, "rate=");
-            if (r) { float v = (float)atof(r + 5); if (v >= 8000 && v <= 192000 && v != g_rate) { g_rate = v; } }
+            if (r) { float v = (float)atof(r + 5); if (v >= 8000 && v <= 192000) g_rate = v; }
         }
     }
-    g_wet_only_test = test;
+    g_test = test;
     __atomic_store_n(&g_mask, mask, __ATOMIC_RELAXED);
 }
 static void write_status(void) {
-    char t[200];
-    int n = snprintf(t, sizeof t, "[fxbands]\ninstalled=%d\nmask=%d\nblocks=%u\nband_blocks=%u\nrate=%.0f\n", g_installed,
-                     g_mask, __atomic_load_n(&g_blocks, __ATOMIC_RELAXED), __atomic_load_n(&g_band_blocks, __ATOMIC_RELAXED), g_rate);
+    char t[2048];
+    int n = snprintf(t, sizeof t, "[fxbands]\ninstalled=%d\nmask=%d\nblocks=%u\nband_blocks=%u\nrate=%.0f\n", g_installed, g_mask,
+                     __atomic_load_n(&g_blocks, __ATOMIC_RELAXED), __atomic_load_n(&g_band_blocks, __ATOMIC_RELAXED), g_rate);
+    for (int i = 0; i < SLOTS && n < (int)sizeof t - 200; i++) {
+        slot_t *q = &slots[i];
+        if (!q->unit || !q->calls) continue;
+        double count = (double)q->calls * q->frames_seen + 1;
+        n += snprintf(t + n, sizeof t - (size_t)n, "unit%d=%p variant=%u calls=%u frames=%u in=%.5f out=%.5f\n", i, q->unit, q->variant,
+                      q->calls, q->frames_seen, sqrt(q->e_in / count), sqrt(q->e_out / count));
+        q->calls = 0; q->e_in = q->e_out = 0;
+    }
     int fd = open(STATUS_FILE ".tmp", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0) return;
     if (write(fd, t, (size_t)n) < 0) {}
@@ -200,7 +239,6 @@ static void write_status(void) {
 }
 
 /* ------------------------------------------------------------------ installing */
-static uintptr_t engine_base;
 static int find_engine(struct dl_phdr_info *info, size_t size, void *data) {
     (void)size; (void)data;
     for (size_t i = 0; i < info->dlpi_phnum; i++) {
@@ -220,52 +258,55 @@ static int find_engine(struct dl_phdr_info *info, size_t size, void *data) {
     return 1; /* only the program itself */
 }
 
-/* 1 installed, 0 not yet (EngineX hasn't patched the entry), -1 never (wrong build/layout) */
-static int try_install(void) {
+/* Hooks all three FX unit functions, or none. Runs in the constructor, before Engine has
+   threads, so nothing executes the code while it changes. */
+static int install(void) {
 #if defined(__arm__)
-    if (!engine_base) return -1;
-    uint32_t *entry = (uint32_t *)(engine_base + chain_offset);
-    if (entry[0] != 0xe51ff004) {
-        /* stock prologue: EngineX not there yet (or not hooking DSP) */
-        static const uint32_t stock[2] = {0xe16d42f4, 0xe1cd60f8};
-        return memcmp(entry, stock, 8) ? -1 : 0;
+    if (!engine_base) return 0;
+    for (int k = 0; k < NUNITS; k++)
+        if (memcmp((void *)(engine_base + unit_offsets[k]), unit_prologue, 8)) return 0;
+    uint32_t *tr = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (tr == MAP_FAILED) return 0;
+    for (int k = 0; k < NUNITS; k++) {
+        uint32_t *t = tr + k * 4;
+        t[0] = unit_prologue[0];
+        t[1] = unit_prologue[1];
+        t[2] = 0xe51ff004; /* ldr pc, [pc, #-4] */
+        t[3] = (uint32_t)(engine_base + unit_offsets[k] + 8);
+        unit_orig[k] = (unit_fn)(uintptr_t)t;
     }
-    uint32_t cur = __atomic_load_n(&entry[1], __ATOMIC_ACQUIRE);
-    if (cur == (uint32_t)(uintptr_t)fxbands_chain) return 1;
-    Dl_info di;
-    if (!dladdr((void *)(uintptr_t)cur, &di) || !di.dli_fname || !strstr(di.dli_fname, "libengine-ui-hook")) return -1;
-    next_chain = (chain_fn)(uintptr_t)cur;
+    if (mprotect(tr, 4096, PROT_READ | PROT_EXEC)) return 0;
+    __builtin___clear_cache((char *)tr, (char *)(tr + NUNITS * 4));
     long pg = sysconf(_SC_PAGESIZE);
-    uintptr_t start = (uintptr_t)&entry[1] & ~(uintptr_t)(pg - 1);
-    if (mprotect((void *)start, (size_t)pg, PROT_READ | PROT_WRITE | PROT_EXEC)) return -1;
-    __atomic_store_n(&entry[1], (uint32_t)(uintptr_t)fxbands_chain, __ATOMIC_RELEASE);
-    mprotect((void *)start, (size_t)pg, PROT_READ | PROT_EXEC);
-    __builtin___clear_cache((char *)entry, (char *)(entry + 2));
+    for (int k = 0; k < NUNITS; k++) {
+        uint32_t *e = (uint32_t *)(engine_base + unit_offsets[k]);
+        uintptr_t start = (uintptr_t)e & ~(uintptr_t)(pg - 1);
+        uintptr_t end = ((uintptr_t)(e + 2) + (uintptr_t)pg - 1) & ~(uintptr_t)(pg - 1);
+        if (mprotect((void *)start, end - start, PROT_READ | PROT_WRITE | PROT_EXEC)) return k ? -1 : 0;
+        e[0] = 0xe51ff004;
+        e[1] = (uint32_t)(uintptr_t)unit_hooks[k];
+        mprotect((void *)start, end - start, PROT_READ | PROT_EXEC);
+        __builtin___clear_cache((char *)e, (char *)(e + 2));
+    }
     return 1;
 #else
-    return -1;
+    return 0;
 #endif
 }
 
 static void *poll_thread(void *arg) {
     (void)arg;
-    int state = 0;
-    for (int tries = 0; state == 0 && tries < 600; tries++) { /* up to 60 s for EngineX to install */
-        state = try_install();
-        if (state == 0) usleep(100000);
-    }
-    g_installed = state == 1;
-    fprintf(stderr, "fxbands: %s\n", g_installed ? "installed on the FX chain" : "not installed (EngineX DSP hook not found)");
+    /* Engine's helper processes (offline analyzers) run the same binary and load this too;
+       only the first one, the real Engine, gets the lock and owns the status file. */
+    int lk = open(STATUS_FILE ".lock", O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (lk < 0 || flock(lk, LOCK_EX | LOCK_NB)) { if (lk >= 0) close(lk); return NULL; }
+    fprintf(stderr, "fxbands: %s\n", g_installed ? "installed on the FX unit" : "not installed (unexpected Engine code)");
     write_status();
     if (!g_installed) return NULL;
     float rate = g_rate;
     for (unsigned tick = 0;; tick++) {
         read_mask();
-        if (g_rate != rate) {
-            rate = g_rate; /* rebuild the crossovers (a click at most; only happens on a rate change) */
-            lp1 = butter(256, rate, 0); hp1 = butter(256, rate, 1);
-            lp2 = butter(2600, rate, 0); hp2 = butter(2600, rate, 1);
-        }
+        if (g_rate != rate) { rate = g_rate; make_filters(rate); }
         if (tick % 100 == 0) write_status();
         usleep(10000);
     }
@@ -277,15 +318,15 @@ static int is_engine(void) {
     ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
     if (n <= 0) return 0;
     exe[n] = 0;
-    return strstr(exe, "/Engine/Engine") != NULL || strstr(exe, "qemu-arm") != NULL;
+    return strstr(exe, "/Engine/Engine") != NULL;
 }
 
 __attribute__((constructor)) static void fxbands_init(void) {
     if (!is_engine()) return;
     dl_iterate_phdr(find_engine, NULL);
     if (!engine_base) return;
-    lp1 = butter(256, g_rate, 0); hp1 = butter(256, g_rate, 1);
-    lp2 = butter(2600, g_rate, 0); hp2 = butter(2600, g_rate, 1);
+    make_filters(g_rate);
+    g_installed = install() == 1;
     pthread_t t;
     pthread_attr_t a;
     pthread_attr_init(&a);
