@@ -167,6 +167,13 @@ prepare() {
         cp "$L/dfb/lib$l-1.4.so.0.0.0" "$ROOT/usr/lib/" && ln -sfn "lib$l-1.4.so.0.0.0" "$ROOT/usr/lib/lib$l-1.4.so.0"
     done
     (cd "$L/dfb/directfb-1.4-6" && for m in */*.so; do cp "$m" "$ROOT/usr/lib/directfb-1.4-6/$m"; done)
+    # This DirectFB looks for its plugins in /lib/directfb-1.4-6 (where it was built to live), so
+    # point that at the ones above; without them it finds no screen driver and rbp quits at once
+    if [ -d "$ROOT/lib/directfb-1.4-6" ] && [ ! -L "$ROOT/lib/directfb-1.4-6" ]; then
+        cp -r "$L/dfb/directfb-1.4-6/." "$ROOT/lib/directfb-1.4-6/"
+    else
+        ln -sfn ../usr/lib/directfb-1.4-6 "$ROOT/lib/directfb-1.4-6"
+    fi
     # no-hardware keeps DirectFB off the GPU driver; an oops there reboots the deck
     printf 'no-hardware\nno-cursor\nsystem=fbdev\nfbdev=/dev/fb0\n' >"$ROOT/usr/etc/directfbrc"
     cp "$ROOT/usr/etc/directfbrc" "$ROOT/etc/directfbrc"
@@ -253,7 +260,7 @@ session() {
         sleep 0.5; i=$((i + 1))
     done
     if ! rbp_ready; then
-        tail -n 5 "$STATE_DIR/rbp.log" >>"$LOG" 2>/dev/null
+        { echo "---- last lines from rekordbox (all of it: $STATE_DIR/rbp.log)"; tail -n 40 "$STATE_DIR/rbp.log"; echo "----"; } >>"$LOG" 2>/dev/null
         if rbp_alive; then why="rekordbox didn't finish starting within $READY_WAIT seconds"; else why="rekordbox quit while starting"; fi
         state stopping "$why. Going back to Engine..."
         engine_back
