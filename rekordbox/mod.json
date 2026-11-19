@@ -1,10 +1,10 @@
 {
   "id": "rekordbox",
   "name": "rekordbox",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Jonathan Robichaud",
   "category": "tools",
-  "description": "Runs the XDJ-RX3 rekordbox player on the SC LIVE 4 (rblive4 by Malphite31). Start it from Settings > ABOUT / UPDATE > rekordbox, under Hardware Diagnostics, or from http://<deck-ip>:8093/. Engine stops while it runs and comes back when you hold SHIFT and BACK for two seconds or press Back to Engine on the web page. Setting up: make rekordbox-pack.tgz on a computer from your own extracted XDJ-RX3 v1.20 files with make-rekordbox-pack.py (only Python needed), then put it on a USB drive and press Set up, or upload it on the web page. No Pioneer files come with this mod. Built for EngineX OS 5.3.0.4.",
+  "description": "Runs the XDJ-RX3 rekordbox player on the SC LIVE 4 (rblive4 by Malphite31). Start it from Settings > ABOUT / UPDATE > rekordbox, under Hardware Diagnostics, or from http://<deck-ip>:8093/. Engine stops while it runs and comes back when you hold SHIFT and BACK for two seconds or press Back to Engine on the web page. Setting up: make rekordbox-pack.tgz on a computer from your own extracted XDJ-RX3 v1.20 files with make-rekordbox-pack.py (a small window, only Python needed), which also sends it to the deck; or put it on a USB drive and press Set up. No Pioneer files come with this mod. Built for EngineX OS 5.3.0.4.",
   "qmlFiles": {
     "AboutTabContent.qml": "Skins/Embedded/Views/ControlCenter/Tabs/Preferences/AboutTabContent.qml"
   },

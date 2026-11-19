@@ -14,16 +14,13 @@ No Pioneer files come with this mod. You make the rekordbox part from your own X
 ## Setting it up
 
 1. Install the mod from the Mod Hub in the EngineX web console.
-2. On your computer, get this folder (`rekordbox/pc` is enough) and run:
+2. On your computer, get the `pc` folder (it's in the mod's repo, and as rekordbox-pack-maker.zip) and open `make-rekordbox-pack.py`: double-click it, or run `python3 make-rekordbox-pack.py`. A small window opens:
+   1. Choose the folder with your extracted XDJ-RX3 v1.20 files, laid out the way rblive4's [docs/04](https://github.com/Malphite31/rblive4/blob/main/docs/04-firmware-assets.md) describes (`XDJRX3-rootfs/`, `XDJRX3/gui/` and, if you have it, `rbp-audio`). It tells you right away if something's missing.
+   2. Press **Make pack**. It applies rblive4's player patches itself, so the stock player works too.
+   3. Type the deck's address (Settings > ABOUT / UPDATE, after Web Console) and press **Send to deck**.
 
-   ```
-   python3 make-rekordbox-pack.py /path/to/extracted
-   ```
-
-   It only needs Python 3, on Windows, macOS or Linux. `extracted` is your own extracted XDJ-RX3 v1.20 files, laid out the way rblive4's [docs/04](https://github.com/Malphite31/rblive4/blob/main/docs/04-firmware-assets.md) describes: `XDJRX3-rootfs/`, `XDJRX3/gui/` and, if you have it, `rbp-audio`. The script applies rblive4's player patches itself, so the stock player works too. Out comes `rekordbox-pack.tgz`.
-3. Give the pack to the deck in either of these ways:
-   - Put it on the top level of a USB drive, plug the drive into the deck and press **Set up** in Settings > ABOUT / UPDATE.
-   - Upload it on `http://<deck-ip>:8093/`.
+   It only needs Python 3 (with Tkinter, which the python.org installers for Windows and macOS include). Without a window: `python3 make-rekordbox-pack.py /path/to/extracted --upload DECK-IP`.
+3. Instead of sending it, you can also put `rekordbox-pack.tgz` on the top level of a USB drive, plug it into the deck and press **Set up** in Settings > ABOUT / UPDATE, or upload it on `http://<deck-ip>:8093/`.
 4. Press **Start**.
 
 The pack is unpacked to `/data/rbx3-run`, the same place rblive4 uses.
