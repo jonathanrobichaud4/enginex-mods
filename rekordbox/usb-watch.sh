@@ -78,26 +78,46 @@ notify() {
   return 1
 }
 
-# --- send umount+then mount, retrying until rbp opens the DB ---------------
+# --- send umount+then mount, retrying until rbp has the stick -------------
 # rbp's DeviceSQL channel takes several seconds to come up after a (re)start;
-# a mount event sent before that is silently lost. Keep re-notifying until
-# rbp actually opens export.pdb (the analysis has started).
+# a mount event sent before that is silently lost, so it's sent again if rbp
+# doesn't take the stick. (EngineX mod: rblive4 re-sent it every 8 s, up to 12
+# times, until it caught export.pdb open. rbp can read export.pdb and close it,
+# so the drive kept dropping out and coming back. Now any file rbp has open or
+# mapped on the stick counts, it waits longer, tries at most 3 times, and a
+# stick without a rekordbox export is announced once.)
+rbp_has_stick() {
+  rbp=$(rbp_pid)
+  [ -n "$rbp" ] || return 1
+  ls -l /proc/$rbp/fd 2>/dev/null | grep -q "$MNT/" && return 0
+  grep -q "$MNT/" /proc/$rbp/maps 2>/dev/null
+}
+
 notify_mount_until_open() {
+  if [ ! -f "$MNT/PIONEER/rekordbox/export.pdb" ] && [ ! -f "$MNT/PIONEER/rekordbox/exportExt.pdb" ]; then
+    sleep 4
+    notify "umount $MNT"; sleep 0.3; notify "mount $MNT"
+    log "attach: no rekordbox export on the stick (PIONEER/rekordbox/export.pdb); announced it once"
+    return 0
+  fi
   n=0
-  while [ $n -lt 12 ]; do
+  while [ $n -lt 3 ]; do
     sleep 4
     notify "umount $MNT"
     sleep 0.3
     notify "mount $MNT"
-    sleep 4
-    rbp=$(rbp_pid)
-    if [ -n "$rbp" ] && ls -l /proc/$rbp/fd 2>/dev/null | grep -q "export.pdb"; then
-      log "attach: rbp opened export.pdb (notify attempt $n)"
-      return 0
-    fi
+    i=0
+    while [ $i -lt 20 ]; do               # up to 20 s for rbp to open something on it
+      sleep 1
+      if rbp_has_stick; then
+        log "attach: rbp is reading the stick (notify attempt $n)"
+        return 0
+      fi
+      i=$((i + 1))
+    done
     n=$((n + 1))
   done
-  log "attach: rbp never opened export.pdb after retries"
+  log "attach: rbp didn't open anything on the stick after 3 tries; leaving it mounted"
   return 1
 }
 
