@@ -174,11 +174,18 @@ detach() {
   rmdir "$MNT" 2>/dev/null
 }
 
-rbp_pid() { ps w | awk '/\/root\/pdj\/rbp/ && !/sh -c/ && !/strace/ && !/awk/ {print $1; exit}'; }
+# EngineX mod: the session writes rbp's pid; ps is only the fallback. (A ps that came back empty
+# once looked like "rbp restarted" on the next poll, and the re-notify ejected the stick.)
+rbp_pid() {
+  p=$(cat /tmp/rekordbox/rbp.pid 2>/dev/null)
+  if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then echo "$p"; return; fi
+  ps w | awk '/\/root\/pdj\/rbp/ && !/sh -c/ && !/strace/ && !/awk/ {print $1; exit}'
+}
 
 run() {
   log "=== usb-watch run: watching buses [$BUSES], poll ${POLL}s ==="
   cur=""
+  gone=0
   last_rbp=$(rbp_pid)
 
   while :; do
@@ -186,6 +193,7 @@ run() {
     rbp=$(rbp_pid)
 
     if [ -n "$dev" ]; then
+      gone=0
       if [ "$dev" != "$cur" ]; then
         [ -n "$cur" ] && detach
         log "attach: detected $dev on watched port"
@@ -194,17 +202,26 @@ run() {
         else
           cur=""
         fi
-      elif [ -n "$rbp" ] && [ "$rbp" != "$last_rbp" ]; then
+      elif ! mountpoint -q "$MNT" || ! mountpoint -q "$CH_MNT"; then
+        # EngineX mod: something else unmounted it; put it back
+        log "attach: $MNT or its chroot bind was unmounted by something else; mounting again"
+        attach "$dev" || cur=""
+      elif [ -n "$rbp" ] && [ -n "$last_rbp" ] && [ "$rbp" != "$last_rbp" ] && ! kill -0 "$last_rbp" 2>/dev/null; then
         log "attach: rbp restarted ($last_rbp -> $rbp), re-notifying mount"
         notify_mount_until_open
       fi
-    else
-      if [ -n "$cur" ]; then
+    elif [ -n "$cur" ]; then
+      # EngineX mod: the stick has to be gone for 3 polls in a row, so a short USB
+      # reset doesn't eject it
+      gone=$((gone + 1))
+      log "detach: $cur not on the bus (poll $gone of 3)"
+      if [ $gone -ge 3 ]; then
         detach
         cur=""
+        gone=0
       fi
     fi
-    last_rbp=$rbp
+    [ -n "$rbp" ] && last_rbp=$rbp
     sleep "$POLL"
   done
 }
