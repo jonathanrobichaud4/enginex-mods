@@ -5,14 +5,19 @@ Double-click it (or run it with no arguments) for a window. From a terminal:
 
     python3 make-rekordbox-pack.py /path/to/extracted [-o rekordbox-pack.tgz] [--upload DECK-IP]
 
-Needs only Python 3 (Windows, macOS or Linux). The folder is your own extracted XDJ-RX3 v1.20
-files, laid out the way rblive4 describes (https://github.com/Malphite31/rblive4, docs/04):
+Needs only Python 3 (Windows, macOS or Linux). It takes either:
+
+  - the decrypted XDJ-RX3 v1.20 firmware ISO (what PrimeBox's rx3dec makes from XDJ-RX3.UPD
+    with your own key; decrypting isn't done here). The rootfs, gui and player are read
+    straight out of it, cramfs included, so nothing else needs unpacking. Or
+  - a folder you extracted, laid out the way rblive4 (docs/04) or PrimeBox (docs/01) describe:
 
     extracted/
-      XDJRX3-rootfs/     the player's userland (from rootfs.cramfs)
-      XDJRX3/gui/        fontdata, imagedata, pset, system
-      rbp-audio          optional: rblive4's patched player. Without it, the stock player is
-                         taken from XDJRX3-rootfs/root/pdj/rbp (or extracted/rbp) and patched here.
+      XDJRX3-rootfs/              the player's userland (from rootfs.cramfs)
+      XDJRX3/gui/ or XDJRX3-gui/  fontdata, imagedata, pset, system
+      rbp-audio or stock-rbp      the player (else XDJRX3/pdj/rbp or the rootfs' root/pdj/rbp);
+                                  stock or rblive4-patched, it's patched here either way
+    A folder with only XDJRX3.iso in it (PrimeBox's extracted/ after rx3dec) works too.
 
 The pack holds only those files, with the player patched by rblive4's patch tables (pc/rblive4,
 MIT). Nothing from Pioneer comes with the mod or this script, and the pack is for your own deck.
@@ -25,11 +30,15 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import struct
 import sys
 import tarfile
 import threading
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rx3iso  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FORMAT = 1
@@ -77,25 +86,56 @@ def find(base, *names):
     return None
 
 
-def check_folder(x):
-    """The parts of an extracted folder, or PackError saying what's missing."""
-    if not x or not os.path.isdir(x):
-        raise PackError("Choose the folder with your extracted XDJ-RX3 files.")
+GUI_DIRS = ("fontdata", "imagedata", "pset", "system")
+ISO_PARTS = ("images/rootfs.cramfs", "images/gui.tar.gz", "images/pdj.tar.gz")
+
+
+def check_source(x):
+    """What to make the pack from: {"iso": path} or {"rootfs", "gui", "player"} folders/files.
+    PackError says what's missing."""
+    if not x or not os.path.exists(x):
+        raise PackError("Choose the decrypted firmware ISO, or the folder with your extracted XDJ-RX3 files.")
+    if os.path.isfile(x):
+        return check_iso(x)
     rootfs = find(x, "XDJRX3-rootfs", "rootfs")
-    gui = find(x, "XDJRX3/gui", "gui")
-    if not rootfs or not os.path.isdir(rootfs):
-        raise PackError("No XDJRX3-rootfs folder in it. rblive4's docs/04 shows the layout.")
+    if not rootfs:
+        isos = [f for f in sorted(os.listdir(x)) if f.lower().endswith(".iso")]
+        if isos:
+            return check_iso(os.path.join(x, isos[0]))
+        raise PackError("No XDJRX3-rootfs folder (or decrypted .iso) in it. rblive4's docs/04 shows the layout.")
+    gui = find(x, "XDJRX3/gui", "XDJRX3-gui", "gui")
     if not gui or not os.path.isdir(gui):
-        raise PackError("No XDJRX3/gui folder in it.")
-    missing = [d for d in ("fontdata", "imagedata", "pset", "system") if not os.path.isdir(os.path.join(gui, d))]
+        raise PackError("No XDJRX3/gui (or XDJRX3-gui) folder in it.")
+    missing = [d for d in GUI_DIRS if not os.path.isdir(os.path.join(gui, d))]
     if missing:
-        raise PackError(f"XDJRX3/gui is missing: {', '.join(missing)}")
+        raise PackError(f"The gui folder is missing: {', '.join(missing)}")
     if not find(rootfs, "lib/ld-linux.so.3"):
         raise PackError("XDJRX3-rootfs has no lib/ld-linux.so.3. Is it the whole player rootfs?")
-    player = find(x, "rbp-audio", "rbp") or find(rootfs, "root/pdj/rbp", "pdj/rbp")
+    player = (find(x, "rbp-audio", "stock-rbp", "rbp", "XDJRX3/pdj/rbp")
+              or find(rootfs, "root/pdj/rbp", "pdj/rbp"))
     if not player:
-        raise PackError("Can't find the player: put rbp-audio in the folder, or keep root/pdj/rbp in the rootfs.")
+        raise PackError("Can't find the player: put rbp-audio or stock-rbp in the folder "
+                        "(it's pdj/rbp inside the firmware's pdj.tar.gz).")
     return {"rootfs": rootfs, "gui": gui, "player": player}
+
+
+def check_iso(path):
+    if path.lower().endswith(".upd"):
+        raise PackError("That's the encrypted .UPD. Decrypt it first (PrimeBox's rx3dec does that with "
+                        "your own key), then choose the .iso it makes.")
+    try:
+        iso = rx3iso.Iso(path)
+    except rx3iso.FormatError as e:
+        raise PackError(str(e))
+    except OSError as e:
+        raise PackError(f"Can't open it: {e.strerror}")
+    try:
+        missing = [p for p in ISO_PARTS if iso.find(p) is None]
+    finally:
+        iso.close()
+    if missing:
+        raise PackError(f"The ISO has no {', '.join(missing)}. Is it the XDJ-RX3 v1.20 firmware?")
+    return {"iso": path}
 
 
 EXEC_DIRS = ("bin/", "sbin/", "usr/bin/", "usr/sbin/")
@@ -162,21 +202,17 @@ class Packer:
         # devices, FIFOs and sockets are left out: the mod makes what the player needs
 
     def make(self, x, out):
-        parts = check_folder(x)
-        with open(parts["player"], "rb") as fh:
-            rbp = bytearray(fh.read())
-        applied, total = patch_player(rbp)
-        md5 = hashlib.md5(rbp).hexdigest()
-        self.log(f"Player: {os.path.relpath(parts['player'], x)} ({applied} of {total} patches applied here)")
-        gui_dirs = [os.path.join(parts["gui"], d) for d in ("fontdata", "imagedata", "pset", "system")]
-        self.done, self.total = 0, self.count(parts["rootfs"]) + sum(self.count(d) for d in gui_dirs)
+        src = check_source(x)
         tmp = out + ".part"
-        self.log(f"Writing {out} (this takes a minute)...")
         try:
             with tarfile.open(tmp, "w:gz", compresslevel=6, format=tarfile.GNU_FORMAT) as tar:
-                self.add_tree(tar, parts["rootfs"], "./", skip={"root/pdj/rbp", "etc/mtab"})
-                for d, path in zip(("fontdata", "imagedata", "pset", "system"), gui_dirs):
-                    self.add_tree(tar, path, f"./root/gui/{d}/")
+                if "iso" in src:
+                    rbp, name = self.from_iso(tar, src["iso"])
+                else:
+                    rbp, name = self.from_folder(tar, src, x)
+                applied, total = patch_player(rbp)
+                md5 = hashlib.md5(rbp).hexdigest()
+                self.log(f"Player: {name} ({applied} of {total} patches applied here)")
                 add_bytes(tar, "./root/pdj/rbp", bytes(rbp), 0o755)
                 stamp = time.strftime("%Y-%m-%d")
                 add_bytes(tar, "./.rekordbox-pack",
@@ -191,6 +227,70 @@ class Packer:
         self.progress(self.total, self.total)
         self.log(f"Done: {out} ({os.path.getsize(out) / 1e6:.0f} MB)")
         return out
+
+    def from_folder(self, tar, src, x):
+        with open(src["player"], "rb") as fh:
+            rbp = bytearray(fh.read())
+        patch_player(bytearray(rbp))  # a wrong player shows up now, not after a minute of packing
+        gui_dirs = [os.path.join(src["gui"], d) for d in GUI_DIRS]
+        self.done, self.total = 0, self.count(src["rootfs"]) + sum(self.count(d) for d in gui_dirs)
+        self.log(f"Writing the pack from {x} (this takes a minute)...")
+        self.add_tree(tar, src["rootfs"], "./", skip={"root/pdj/rbp", "etc/mtab"})
+        for d, path in zip(GUI_DIRS, gui_dirs):
+            self.add_tree(tar, path, f"./root/gui/{d}/")
+        return rbp, os.path.relpath(src["player"], x)
+
+    def from_iso(self, tar, path):
+        iso = rx3iso.Iso(path)
+        try:
+            self.log(f"Reading {os.path.basename(path)}...")
+            pdj = tarfile.open(fileobj=io.BytesIO(iso.read("images/pdj.tar.gz")), mode="r:gz")
+            member = next((m for m in pdj.getmembers()
+                           if m.isfile() and m.name.lstrip("./").split("/")[-1] == "rbp"), None)
+            if member is None:
+                raise PackError("The firmware's pdj.tar.gz has no rbp in it.")
+            rbp = bytearray(pdj.extractfile(member).read())
+            patch_player(bytearray(rbp))
+            gui = tarfile.open(fileobj=io.BytesIO(iso.read("images/gui.tar.gz")), mode="r:gz")
+            gui_members = [m for m in gui.getmembers() if m.name.strip("./")]
+            try:
+                fs = rx3iso.Cramfs(iso.read("images/rootfs.cramfs"))
+            except rx3iso.FormatError as e:
+                raise PackError(str(e))
+        finally:
+            iso.close()
+        self.done = 0
+        self.total = sum(1 for _ in fs.walk(data=False)) + len(gui_members)
+        self.log("Writing the pack (this takes a minute)...")
+        for rel, mode, size, body in fs.walk():
+            if rel in ("root/pdj/rbp", "etc/mtab"):
+                self.step()
+                continue
+            name = "./" + rel
+            ti = tarfile.TarInfo(name)
+            ti.uid = ti.gid = 0
+            ti.uname = ti.gname = "root"
+            ti.mtime = int(time.time())
+            if stat.S_ISDIR(mode):
+                ti.type, ti.mode = tarfile.DIRTYPE, 0o755
+                tar.addfile(ti)
+            elif stat.S_ISLNK(mode):
+                ti.type, ti.linkname, ti.mode = tarfile.SYMTYPE, body, 0o777
+                tar.addfile(ti)
+            else:
+                ti.size, ti.mode = size, (mode & 0o7777) or 0o644
+                tar.addfile(ti, io.BytesIO(body))
+            self.step()
+        for m in gui_members:
+            m.name = "./root/gui/" + m.name.lstrip("./")
+            m.uid = m.gid = 0
+            m.uname = m.gname = "root"
+            if m.isfile():
+                tar.addfile(m, gui.extractfile(m))
+            elif m.isdir() or m.issym():
+                tar.addfile(m)
+            self.step()
+        return rbp, "pdj/rbp from the ISO"
 
 
 def add_bytes(tar, name, data, mode=0o644):
@@ -303,9 +403,12 @@ def gui():
     frm.pack(fill="both", expand=True)
     frm.columnconfigure(1, weight=1)
 
-    ttk.Label(frm, text="1. Your extracted XDJ-RX3 v1.20 files", style="Step.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", **pad)
+    ttk.Label(frm, text="1. Your XDJ-RX3 v1.20 firmware: the decrypted .iso, or a folder you extracted", style="Step.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", **pad)
     ttk.Entry(frm, textvariable=folder).grid(row=1, column=0, columnspan=2, sticky="ew", **pad)
-    ttk.Button(frm, text="Choose...", command=lambda: pick_folder()).grid(row=1, column=2, **pad)
+    picks = ttk.Frame(frm)
+    picks.grid(row=1, column=2, **pad)
+    ttk.Button(picks, text="ISO...", width=7, command=lambda: pick_iso()).pack(side="left")
+    ttk.Button(picks, text="Folder...", width=8, command=lambda: pick_folder()).pack(side="left", padx=(4, 0))
     check_lbl = ttk.Label(frm, textvariable=check, wraplength=520)
     check_lbl.grid(row=2, column=0, columnspan=3, sticky="w", padx=10)
 
@@ -339,9 +442,12 @@ def gui():
 
     def refresh(*_):
         try:
-            parts = check_folder(folder.get())
-            player = os.path.basename(parts["player"])
-            check.set(f"Looks right: rootfs, gui and the player ({player}) are there.")
+            parts = check_source(folder.get())
+            if "iso" in parts:
+                check.set(f"Looks right: {os.path.basename(parts['iso'])} has the rootfs, gui and player.")
+            else:
+                player = os.path.basename(parts["player"])
+                check.set(f"Looks right: rootfs, gui and the player ({player}) are there.")
             check_lbl.configure(foreground="#1a7f37")
         except PackError as e:
             check.set(str(e) if folder.get() else "")
@@ -357,6 +463,12 @@ def gui():
         d = filedialog.askdirectory(title="Folder with XDJRX3-rootfs and XDJRX3/gui", initialdir=folder.get() or None)
         if d:
             folder.set(d)
+
+    def pick_iso():
+        f = filedialog.askopenfilename(title="The decrypted firmware ISO",
+                                       filetypes=[("Firmware ISO", "*.iso"), ("All files", "*")])
+        if f:
+            folder.set(f)
 
     def pick_out():
         f = filedialog.asksaveasfilename(title="Save the pack as", defaultextension=".tgz",
@@ -421,7 +533,7 @@ def main():
                   "  python3 make-rekordbox-pack.py /path/to/extracted")
             return 1
     ap = argparse.ArgumentParser(description="Make rekordbox-pack.tgz from your extracted XDJ-RX3 files.")
-    ap.add_argument("extracted", help="folder with XDJRX3-rootfs/ and XDJRX3/gui/ (see rblive4 docs/04)")
+    ap.add_argument("extracted", help="the decrypted firmware .iso, or a folder with XDJRX3-rootfs/ and the gui")
     ap.add_argument("-o", "--output", default="rekordbox-pack.tgz")
     ap.add_argument("--upload", metavar="DECK-IP", help="send the pack to the deck afterwards")
     a = ap.parse_args()

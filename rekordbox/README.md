@@ -13,9 +13,11 @@ No Pioneer files come with this mod. You make the rekordbox part from your own X
 
 ## Setting it up
 
+Getting the firmware: the XDJ-RX3 v1.20 update (`XDJ-RX3.UPD`) is encrypted. Decrypting it is up to you and isn't done by this mod or its tools; PrimeBox's [docs/01](https://github.com/chaparro2001/PrimeBox/blob/main/docs/01-firmware-extraction.md) explains how its `rx3dec` makes the ISO from it with a key you supply, and that this may be restricted where you live. The pack maker starts from that ISO.
+
 1. Install the mod from the Mod Hub in the EngineX web console.
 2. On your computer, get the `pc` folder (it's in the mod's repo, and as rekordbox-pack-maker.zip) and open `make-rekordbox-pack.py`: double-click it, or run `python3 make-rekordbox-pack.py`. A small window opens:
-   1. Choose the folder with your extracted XDJ-RX3 v1.20 files, laid out the way rblive4's [docs/04](https://github.com/Malphite31/rblive4/blob/main/docs/04-firmware-assets.md) describes (`XDJRX3-rootfs/`, `XDJRX3/gui/` and, if you have it, `rbp-audio`). It tells you right away if something's missing.
+   1. Choose your firmware: the **decrypted XDJ-RX3 v1.20 ISO** (press ISO...), or a folder you already extracted (press Folder...). With the ISO, everything is read straight out of it, rootfs.cramfs included, so there's nothing else to unpack and no Docker or fusecram. A folder can be laid out the way rblive4's [docs/04](https://github.com/Malphite31/rblive4/blob/main/docs/04-firmware-assets.md) or PrimeBox's [docs/01](https://github.com/chaparro2001/PrimeBox/blob/main/docs/01-firmware-extraction.md) describe. It tells you right away if something's missing.
    2. Press **Make pack**. It applies rblive4's player patches itself, so the stock player works too.
    3. Type the deck's address (Settings > ABOUT / UPDATE, after Web Console) and press **Send to deck**.
 
