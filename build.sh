@@ -32,7 +32,7 @@ for dir in "$HERE"/*/; do
     stage=$WORK/$id
     mkdir -p "$stage"
     # everything but the patches goes in as is
-    (cd "$dir" && find . \( -path ./patches -o -path ./src \) -prune -o -type f -print) | while read -r f; do
+    (cd "$dir" && find . \( -path ./patches -o -path ./src -o -path ./pc \) -prune -o -type f -print) | while read -r f; do
         mkdir -p "$stage/$(dirname "$f")"
         cp -p "$dir/$f" "$stage/$f"
     done
@@ -40,6 +40,8 @@ for dir in "$HERE"/*/; do
     python3 -c 'import json,sys
 for f, res in json.load(open(sys.argv[1])).get("qmlFiles", {}).items(): print(f + "\t" + res)' "$dir/mod.json" > "$WORK/qml.list"
     while IFS='	' read -r file res; do
+        # a QML file of the mod's own (no patch): it went in as is above
+        [ -f "$dir/patches/$file.patch" ] || { [ -f "$stage/$file" ] && continue; echo "$id: no $file or patches/$file.patch" >&2; exit 1; }
         base=$STOCK what="stock"
         if [ -f "$dir/patches/enginex-base" ] && grep -qx "$file" "$dir/patches/enginex-base"; then
             [ -d "$PACK" ] || { echo "$id: $file patches EngineX's UI pack; pass its folder as the 2nd argument" >&2; exit 1; }

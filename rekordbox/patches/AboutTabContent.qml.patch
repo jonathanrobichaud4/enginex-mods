@@ -1,0 +1,36 @@
+--- AboutTabContent.qml
++++ AboutTabContent.qml
+@@ -3,6 +3,7 @@
+ import "Entries"
+ import "Entries/Base"
+ import "Base"
++import "Advanced/Entries" as Diag   // sc-diagnostics, rekordbox
+ 
+ FlickableTabContent {
+     visible: true
+@@ -17,6 +18,25 @@
+             width: 1
+             height: 16
+         },
++        Diag.StartProductionTestApplication {},   // sc-diagnostics: Hardware Diagnostics
++        Loader {   // rekordbox: the rekordbox mod's launcher serves this entry when it's installed
++            id: rekordboxEntry
++            property int tries: 0
++            Layout.fillWidth: true
++            Layout.preferredHeight: item ? item.Layout.preferredHeight : 0
++            source: "http://127.0.0.1:8093/entry.qml"
++            onVisibleChanged: if (visible) tries = 0
++            Timer {   // the launcher may start after Engine: try again for a minute each time the tab shows
++                interval: 5000
++                repeat: true
++                running: rekordboxEntry.visible && rekordboxEntry.status === Loader.Error && rekordboxEntry.tries < 12
++                onTriggered: {
++                    rekordboxEntry.tries++
++                    rekordboxEntry.source = ""
++                    rekordboxEntry.source = "http://127.0.0.1:8093/entry.qml?try=" + rekordboxEntry.tries   // a new URL: Qt keeps failed loads
++                }
++            }
++        },
+         Analytics {},
+         Legal {},
+         GatherDebugInformation {},

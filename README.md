@@ -8,7 +8,8 @@ Mods for [EngineX OS](https://github.com/Cd1s/EngineX-OS) on the Denon DJ SC LIV
 | [FX Channel Indicator](fx-channel-indicator/) | 2.3.1 | Shows which channel the FX unit is on, blinks that channel's CUE LED, adds a band mode for the FX frequency control (LOW / MID / HIGH in any combination, LOW + HIGH included, green while the FX is on), and reverse jog wheel switches on 5.3.0.4. |
 | [System Stats](system-stats/) | 1.1.0 | CPU use, RAM use and CPU temperature next to the clock. |
 | [Streaming Icons](streaming-icons/) | 1.1.0 | Shows each track's real service icon (Spotify, Deezer, NetEase, SoundCloud, Beatport, Apple Music, USB/SD) in the browser and on the decks, per track, instead of TIDAL on everything EngineX plays through TIDAL. |
-| [Hardware Diagnostics](sc-diagnostics/) | 1.1.0 | A test app for the deck's hardware: controls light up as you use them, LED and pad colour tests, jog displays, tones to Main/Booth/Phones with input meters, screen patterns and a touch grid. Start it from Settings > ABOUT / UPDATE or http://<deck-ip>:8092/. Engine stops while it runs and comes back on EXIT (or hold BROWSE for 3 s). |
+| [Hardware Diagnostics](sc-diagnostics/) | 1.1.1 | A test app for the deck's hardware: controls light up as you use them, LED and pad colour tests, jog displays, tones to Main/Booth/Phones with input meters, screen patterns and a touch grid. Start it from Settings > ABOUT / UPDATE or http://<deck-ip>:8092/. Engine stops while it runs and comes back on EXIT (or hold BROWSE for 3 s). |
+| [rekordbox](rekordbox/) | 1.0.0 | Runs the XDJ-RX3 rekordbox player ([rblive4](https://github.com/Malphite31/rblive4)) on the deck. Start it from Settings > ABOUT / UPDATE, under Hardware Diagnostics, or http://<deck-ip>:8093/. Engine stops while it runs and comes back when you hold SHIFT + BACK for 2 s. You make its pack once from your own XDJ-RX3 files with a Python script, then give it to the deck on a USB drive or through the web page. |
 
 `tools/streaming/` has the diagnostic scripts used to debug the streaming services (they mask tokens and passwords in their reports).
 
@@ -25,7 +26,7 @@ The second folder is EngineX's UI pack (MIT licensed). Streaming Icons also chan
 
 The patches are made against Engine 5.3.0 for SC LIVE 4. Upload the packages in `dist/` through the Mod Hub.
 
-USB Audio Out has no Engine code in it and works as is from its folder. Its `lib/534` and `lib/535` hooks are EngineX's `libengine-ui-hook.so` built with `premaster-tap.patch` / `premaster-tap-535.patch`; EngineX is MIT licensed (see `usb-audio-out/LICENSE-EngineX`).
+USB Audio Out has no Engine code in it and works as is from its folder. Hardware Diagnostics and rekordbox install the same About tab, which shows each one's entry when that mod is installed, so either can be installed alone or both together. rekordbox's prebuilt parts (launcher, rblive4's shims, patched DirectFB) are rebuilt with `rekordbox/src/build.sh`. Its `lib/534` and `lib/535` hooks are EngineX's `libengine-ui-hook.so` built with `premaster-tap.patch` / `premaster-tap-535.patch`; EngineX is MIT licensed (see `usb-audio-out/LICENSE-EngineX`).
 
 ## Testing without a deck
 

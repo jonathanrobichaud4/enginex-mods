@@ -1,0 +1,54 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>rekordbox on the SC LIVE 4</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;background:#111;color:#eee;max-width:600px;margin:6vh auto;padding:0 20px}
+h1{font-size:24px;margin-bottom:4px}h2{font-size:18px;margin-top:32px}
+button,label.b{font:inherit;font-weight:600;padding:12px 20px;border:0;border-radius:8px;margin:6px 8px 6px 0;cursor:pointer;display:inline-block}
+#go{background:#2e9e5b;color:#fff}#end{background:#444;color:#fff}label.b{background:#2d6cdf;color:#fff}
+button:disabled{opacity:.4;cursor:default}
+#state{font-size:18px;font-weight:600}#msg{color:#bbb}
+progress{width:100%;height:10px;display:none;margin-top:8px}
+p,li{color:#aaa}code{background:#222;padding:1px 5px;border-radius:4px;color:#ddd}
+</style></head><body>
+<h1>rekordbox</h1>
+<p>Runs the XDJ-RX3 rekordbox player on this deck, using <a href="https://github.com/Malphite31/rblive4" style="color:#9cf">rblive4</a>. Engine stops while it runs and starts again when you quit.</p>
+<div id="state">...</div><div id="msg"></div>
+<button id="go" disabled>Start</button><button id="end" disabled>Back to Engine</button>
+<p>To quit from the deck, hold <b>SHIFT</b> and <b>BACK</b> together for two seconds.</p>
+
+<h2>Setting it up</h2>
+<ol>
+<li>On your computer, get the <code>rekordbox</code> folder of the <a href="https://github.com/jonathanrobichaud4/enginex-mods" style="color:#9cf">enginex-mods</a> repo and run<br>
+<code>python3 make-rekordbox-pack.py /path/to/extracted</code><br>
+It needs only Python 3, on Windows, macOS or Linux. The folder is your own extracted XDJ-RX3 v1.20 files (rblive4 explains the layout); nothing from Pioneer comes with this mod.</li>
+<li>Give the deck the <code>rekordbox-pack.tgz</code> it makes, either way:
+<ul><li>put it on a USB drive, plug the drive into the deck and press <b>Set up</b> in Settings &gt; ABOUT / UPDATE, or</li>
+<li>upload it here:</li></ul>
+<label class="b" for="f">Upload rekordbox-pack.tgz</label><input type="file" id="f" accept=".tgz,.gz" style="display:none">
+<progress id="p" max="100" value="0"></progress></li>
+<li>Press <b>Start</b>.</li>
+</ol>
+<script>
+const $=id=>document.getElementById(id);
+const words={missing:'Not set up yet',ready:'Ready',working:'Working...',installing:'Installing the pack...',
+ starting:'Starting rekordbox...',running:'rekordbox is running',stopping:'Going back to Engine...',error:'Something went wrong'};
+let st='';
+async function up(){
+ try{const r=await (await fetch('status')).json();st=r.state;
+  $('state').textContent=words[st]||st;$('msg').textContent=r.message||'';
+  $('go').textContent=r.installed?'Start':'Set up from USB';
+  $('go').disabled=!(st==='ready'||st==='missing'||st==='error');
+  $('end').disabled=!(st==='running'||st==='starting');
+ }catch(e){$('state').textContent='No answer from the deck';}
+}
+$('go').onclick=async()=>{$('go').disabled=true;await fetch('start',{method:'POST'});setTimeout(up,500)};
+$('end').onclick=async()=>{$('end').disabled=true;await fetch('stop',{method:'POST'});setTimeout(up,500)};
+$('f').onchange=()=>{const file=$('f').files[0];if(!file)return;const x=new XMLHttpRequest();
+ $('p').style.display='block';x.upload.onprogress=e=>{if(e.lengthComputable)$('p').value=100*e.loaded/e.total};
+ x.onload=()=>{$('p').style.display='none';let m='';try{m=JSON.parse(x.responseText).error||''}catch(e){}
+  if(m)$('msg').textContent=m;up()};
+ x.onerror=()=>{$('p').style.display='none';$('msg').textContent='The upload failed.'};
+ x.open('POST','upload');x.send(file);$('f').value=''};
+up();setInterval(up,1500);
+</script></body></html>
