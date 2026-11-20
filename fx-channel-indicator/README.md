@@ -1,4 +1,4 @@
-# FX Channel Indicator 2.3.2
+# FX Channel Indicator 2.4.0
 
 Three additions to the SC LIVE 4 FX bar:
 
@@ -198,3 +198,20 @@ LOW + HIGH, no MID alone, no "none". 2.3.2 works out which scheme the installed 
 (from Engine's launcher and its unit) and writes that; 5.3.0.4 is handled as before.
 `sh fx-bands.sh status` shows the file and variable it uses and whether Engine has the
 library.
+
+## 2.4.0: rebased on EngineX 5.3.0.5
+
+Built on EngineX 5.3.0.5-r1's screen files. `DJFx.qml` now carries 5.3.0.5's changes (the FX
+selector's auto-commit and " (PX)" names) along with the mod's. The mod no longer ships
+`JogWheel.qml` and `GlobalAssignmentConfig.qml`: they were copies of a 5.3.0.5 pre-release,
+and installing them switched off what the release added to those files (BPM decimals,
+pitch-bend beat jump, restore BPM on unsync, Mixstream FX). Reverse jog is in EngineX's own
+Settings > Device on 5.3.0.5.
+
+2.3.2 still didn't load the band library on an SC LIVE 4. There EngineX installs from its data
+bundle: Engine's unit sets `ENGINEX_UI_HOOK` itself and the launcher is
+`/data/enginex/bundle/bin/engine-ui-guard`, not the `/etc/enginex` copy 2.3.2 looked for. Not
+finding it, 2.3.2 assumed 5.3.0.4 and wrote `SC5000_UI_HOOK`, which 5.3.0.5 ignores. 2.4.0 reads
+the variable from Engine's unit (`systemctl show engine.service -p Environment`) and only falls
+back to the launcher (now including the bundle's). Checked in the emulator with 5.3.0.5's
+screens and hook: the library installs, and LOW + HIGH sends mask 5 with MID left dry.

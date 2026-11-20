@@ -64,12 +64,12 @@
      property alias songColor: songText.color
  
      property alias spacing: layout.spacing
-@@ -72,7 +129,7 @@
-             verticalCenter: parent.verticalCenter
-         }
+@@ -74,7 +131,7 @@
          color: Style.icon01Color
--        source: visible ? `qrc:/Skins/UIKit/Icons/Source${artistSong.trackSource}.png` : ""
-+        source: visible ? (artistSong.siIcon !== "" ? artistSong.siIcon : `qrc:/Skins/UIKit/Icons/Source${artistSong.trackSource}.png`) : ""
-         visible: artistSong.isStreamingTrack
-         width: src.width
+ 		readonly property string scMark: typeof root !== "undefined" && root && root.scSlotIcon ? root.scSlotIcon(artistSong.trackSource, artistSong.deckIndex) : ""
+ 		useOriginal: scMark !== ""
+-		source: visible ? (scMark !== "" ? scMark : `qrc:/Skins/UIKit/Icons/Source${artistSong.trackSource}.png`) : ""
++		source: visible ? (scMark !== "" ? scMark : (artistSong.siIcon !== "" ? artistSong.siIcon : `qrc:/Skins/UIKit/Icons/Source${artistSong.trackSource}.png`)) : ""
+ 		visible: artistSong.isStreamingTrack || scMark !== ""
+ 		width: scMark !== "" ? 48 : src.width
          height: (src.height / src.width) * width

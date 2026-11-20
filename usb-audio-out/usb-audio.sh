@@ -25,8 +25,8 @@
 #   0         the computer gets what the deck outputs (after the master knob).
 #   Both taps need a patched EngineX hook (lib/, one per EngineX release,
 #   EngineX v5.3.0.4-r5 plus premaster-tap.patch).
-#   Engine is pointed at the patched hook with a SC5000_UI_HOOK line in
-#   /data/sc5000-custom/ui-scale.env, which Engine's unit reads at every start.
+#   Engine is pointed at the patched hook with the UI hook line (ENGINEX_UI_HOOK on 5.3.0.5, SC5000_UI_HOOK before) in
+#   EngineX's ui-scale.env, which Engine's unit reads at every start.
 #   EngineX's own hook file is never changed. It is only used when EngineX's hook
 #   is exactly 5.3.0.4's; anything else stays after the master knob, says so in
 #   the log, and the line is taken out again. Disabling the mod removes the line.
@@ -50,24 +50,50 @@ LOG=$RUN/usb-audio-out.log
 PIDFILE=$RUN/usb-audio-out.pid
 UNBOUND=$RUN/usb-audio-out.unbound
 PREMASTER="$(cat "$DIR/premaster" 2>/dev/null | tr -d ' \r\n')"
+# How this EngineX points Engine at its hook (worked out from its launcher):
+#   5.3.0.5 and later:   ENGINEX_UI_HOOK in /data/enginex/ui-scale.env, hook in /etc/enginex
+#   5.3.0.4 and earlier: SC5000_UI_HOOK  in /data/sc5000-custom/ui-scale.env
+# Engine's own unit says which: EngineX sets the variable there (Environment=ENGINEX_UI_HOOK=... on
+# 5.3.0.5, from the data bundle on an SC LIVE 4). Failing that, which one its launcher reads.
+unit_vars=$(systemctl show engine.service -p Environment 2>/dev/null)
+case "$unit_vars" in
+    *ENGINEX_UI_HOOK=*) new_scheme=1 ;;
+    *SC5000_UI_HOOK=*) new_scheme=0 ;;
+    *) grep -qs 'ENGINEX_UI_HOOK' ${USBAUDIO_GUARDS:-/data/enginex/bundle/bin/engine-ui-guard /etc/enginex/engine-ui-guard /etc/sc5000/engine-ui-guard} && new_scheme=1 || new_scheme=0 ;;
+esac
+if [ "$new_scheme" = 1 ]; then
+    VAR=ENGINEX_UI_HOOK
+    DEFAULT_ENV=/data/enginex/ui-scale.env
+    HOOKS="/data/enginex/bundle/lib/libengine-ui-hook.so /etc/enginex/libengine-ui-hook.so"
+else
+    VAR=SC5000_UI_HOOK
+    DEFAULT_ENV=/data/sc5000-custom/ui-scale.env
+    HOOKS="/data/enginex/bundle/lib/libengine-ui-hook.so /etc/sc5000/libengine-ui-hook.so"
+fi
 # EngineX's own hook, which the patched one stands in for.
 find_hook() {
     [ -n "${USBAUDIO_HOOK:-}" ] && { echo "$USBAUDIO_HOOK"; return; }
-    for h in /data/enginex/bundle/lib/libengine-ui-hook.so /etc/sc5000/libengine-ui-hook.so; do
+    h=$(echo "$unit_vars" | sed 's/^Environment=//' | tr ' ' '\n' | tr -d '"' | sed -n "s/^$VAR=//p" | head -n 1)
+    [ -n "$h" ] && [ -f "$h" ] && { echo "$h"; return; }
+    for h in $HOOKS; do
         [ -f "$h" ] && { echo "$h"; return; }
     done
-    echo /data/enginex/bundle/lib/libengine-ui-hook.so
+    set -- $HOOKS
+    echo "$1"
 }
 HOOK="$(find_hook)"
 # Engine's unit reads this file at every start (EngineX's UI scale setting lives in
-# it too); a SC5000_UI_HOOK line here makes Engine preload the patched hook from the
+# it too); the UI hook line here makes Engine preload the patched hook from the
 # first start of each boot, so no restart is needed after the first enable.
-ENVFILE="${USBAUDIO_ENVFILE:-/data/sc5000-custom/ui-scale.env}"
+# The file Engine's unit really reads (EnvironmentFile=-.../ui-scale.env), else the default.
+unit_env=$(systemctl cat engine.service 2>/dev/null | sed -n 's/^EnvironmentFile=-\{0,1\}\(.*ui-scale\.env\)$/\1/p' | tail -n 1)
+ENVFILE="${USBAUDIO_ENVFILE:-${unit_env:-$DEFAULT_ENV}}"
 HOOK_FLAG="${USBAUDIO_PREMASTER_FLAG:-/data/enginex/ui/live-premaster}"
 # EngineX 5.3.0.4's libengine-ui-hook.so (data bundle and v5.3.0.4-r5), and the patched build of it.
 # EngineX's own hook per release, and the patched build that stands in for it.
 #   5.3.0.4 (r5):        lib/534/libengine-ui-hook.so  (premaster-tap.patch)
-#   5.3.0.5 (beta1/rel): lib/535/libengine-ui-hook.so  (premaster-tap-535.patch)
+#   5.3.0.5 (beta1):     lib/535/libengine-ui-hook.so  (premaster-tap-535.patch)
+#   5.3.0.5 (r1):        lib/535r1/libengine-ui-hook.so (premaster-tap-535-r1.patch)
 # The file name must stay libengine-ui-hook.so: the hook only patches Engine
 # when LD_PRELOAD contains that name, otherwise it loads the UI packs only.
 pick_patched() {
@@ -79,7 +105,11 @@ pick_patched() {
         2841ca5a4aaed0cbe468eae95ed5276ade5ea5a1dd910772103f460570a8dfad)
             HOOK_NEW="$DIR/lib/535/libengine-ui-hook.so"
             HOOK_NEW_SHA=64564117dbe0164c1ecfec4246414225459c9b4a5d85cef637a9ca6f2671af5a
-            HOOK_RELEASE=5.3.0.5 HOOK_RELEASE_DIR=535 ;;
+            HOOK_RELEASE=5.3.0.5-beta1 HOOK_RELEASE_DIR=535 ;;
+        5077d7caf6c67836f8297026126afd9d4212ddafc56133c60c6b3953d8c89914)
+            HOOK_NEW="$DIR/lib/535r1/libengine-ui-hook.so"
+            HOOK_NEW_SHA=7412e9719309ce8eafc10e641db47d4dda3330f2b0f65765cd3dc50b761b51d0
+            HOOK_RELEASE=5.3.0.5-r1 HOOK_RELEASE_DIR=535r1 ;;
         *) return 1 ;;
     esac
 }
@@ -225,7 +255,7 @@ engine_has_patched() {
 # 1 when the running Engine has any patched hook of this mod (any release) loaded.
 engine_has_any_patched() {
     for pid in $(pidof Engine 2>/dev/null); do
-        grep -qE "/usb-audio-out/lib/53[0-9]/libengine-ui-hook.so|libengine-ui-hook-premaster" /proc/$pid/maps 2>/dev/null && return 0
+        grep -qE "/usb-audio-out/lib/53[^/]*/libengine-ui-hook.so|libengine-ui-hook-premaster" /proc/$pid/maps 2>/dev/null && return 0
     done
     return 1
 }
@@ -234,24 +264,24 @@ engine_running() {
     [ -n "$(pidof Engine 2>/dev/null)" ]
 }
 
-# The line is SC5000_UI_HOOK=<hook>[:<extra library>...]: the first entry is the hook
+# The line is $VAR=<hook>[:<extra library>...]: the first entry is the hook
 # (ours or EngineX's), anything after a colon was added by another mod (fx-channel-indicator's
 # band library) and is kept as it is.
 hook_extras() {
-    sed -n 's/^SC5000_UI_HOOK=[^:]*//p' "$ENVFILE" 2>/dev/null | head -n 1
+    sed -n "s/^$VAR=[^:]*//p" "$ENVFILE" 2>/dev/null | head -n 1
 }
 hook_first() {
-    sed -n 's/^SC5000_UI_HOOK=\([^:]*\).*/\1/p' "$ENVFILE" 2>/dev/null | head -n 1
+    sed -n "s/^$VAR=\([^:]*\).*/\1/p" "$ENVFILE" 2>/dev/null | head -n 1
 }
 
-# Sets the hook in the SC5000_UI_HOOK line (with no argument: back to EngineX's own, or no
+# Sets the hook in the $VAR line (with no argument: back to EngineX's own, or no
 # line at all if nothing else is in it), keeping every other line and any extra libraries.
 set_env_hook() {
     tmp="$ENVFILE.usb-audio-out.$$"
     extras=$(hook_extras)
-    { grep -v '^SC5000_UI_HOOK=' "$ENVFILE" 2>/dev/null
-      if [ -n "$1" ]; then echo "SC5000_UI_HOOK=$1$extras"
-      elif [ -n "$extras" ]; then echo "SC5000_UI_HOOK=$HOOK$extras"; fi
+    { grep -v "^$VAR=" "$ENVFILE" 2>/dev/null
+      if [ -n "$1" ]; then echo "$VAR=$1$extras"
+      elif [ -n "$extras" ]; then echo "$VAR=$HOOK$extras"; fi
     } > "$tmp" || { rm -f "$tmp"; return 1; }
     if [ -s "$tmp" ]; then
         mv -f "$tmp" "$ENVFILE"
@@ -301,7 +331,7 @@ restart_engine_patched() {
     setsid sh -c '
         sleep 2
         i=0
-        while ! grep -q "^SC5000_UI_HOOK='"$HOOK_NEW"'\(:\|\$\)" "'"$ENVFILE"'" 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
+        while ! grep -q "^'"$VAR"'='"$HOOK_NEW"'\(:\|\$\)" "'"$ENVFILE"'" 2>/dev/null && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
         systemctl restart engine
     ' < /dev/null > /dev/null 2>&1 &
 }
@@ -342,10 +372,10 @@ premaster_on() {
     fi
 }
 
-# Takes the SC5000_UI_HOOK line out and gets Engine back on EngineX's own hook.
+# Takes the $VAR line out and gets Engine back on EngineX's own hook.
 premaster_unset() {
     stop_env_watch
-    if env_has_hook || grep -q '^SC5000_UI_HOOK=' "$ENVFILE" 2>/dev/null; then
+    if env_has_hook || grep -q "^$VAR=" "$ENVFILE" 2>/dev/null; then
         set_env_hook "" && log "pre-master: Engine goes back to EngineX's own hook"
     fi
     engine_has_any_patched && restart_engine_later stock

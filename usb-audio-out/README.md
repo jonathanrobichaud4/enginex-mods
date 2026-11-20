@@ -160,3 +160,15 @@ checks the first entry and keeps anything after a colon, so FX Channel Indicator
 library (2.3.0) stays loaded when the pre-master tap turns on or off. With only extra
 libraries left, the line goes back to EngineX's own hook plus those libraries instead of
 being removed.
+
+## 0.7.0: EngineX 5.3.0.5 release
+
+- The released 5.3.0.5 (`v5.3.0.5-r1`) has a different hook from the beta that 0.6.x knew,
+  so 0.6.x stayed after the master knob there. `lib/535r1/libengine-ui-hook.so` is built
+  from v5.3.0.5-r1's `engine_ui_hook.c` plus `premaster-tap-535-r1.patch` (the 0.6 tap,
+  merged onto the release: its poll moved into `lim_poll_once`, and the tap's edit-table entry
+  is `HF_ALWAYS`). Checked in the emulator: hook_ready=1, and all three tap points
+  (final, master-sum, recorder) receive blocks.
+- 5.3.0.5 reads the hook from `ENGINEX_UI_HOOK` in `/data/enginex/ui-scale.env`, and its own
+  hook moved to `/etc/enginex`. The script works out which scheme the installed EngineX uses
+  (as FX Channel Indicator 2.3.2 does), so 5.3.0.4 keeps working too.

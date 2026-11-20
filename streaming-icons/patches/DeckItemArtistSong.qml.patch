@@ -64,12 +64,12 @@
      readonly property bool isStemmed: scHead && scHead.title ? scHead.stems : view.stemmed
      readonly property bool isDemoContent: view.isDemoContent
      readonly property bool explicitLyrics: view.explicitLyrics
-@@ -114,7 +171,7 @@
-                         objectName: "Deck_StreamingProviderIcon"
-                         anchors.verticalCenter: parent.verticalCenter
+@@ -116,7 +173,7 @@
                          color: Style.icon01Color
--                        source: visible ? `qrc:/streaming/${artistSong.trackSource}/Icon.png` : ""
-+                        source: visible ? (artistSong.siIcon !== "" ? artistSong.siIcon : `qrc:/streaming/${artistSong.trackSource}/Icon.png`) : ""
+                         readonly property string scMark: typeof root !== "undefined" && root && root.scSlotIcon ? root.scSlotIcon(artistSong.trackSource, artistSong.deckIndex) : ""
+                         useOriginal: scMark !== ""
+-                        source: visible ? (scMark !== "" ? scMark : `qrc:/streaming/${artistSong.trackSource}/Icon.png`) : ""
++                        source: visible ? (scMark !== "" ? scMark : (artistSong.siIcon !== "" ? artistSong.siIcon : `qrc:/streaming/${artistSong.trackSource}/Icon.png`)) : ""
                          width: artistSong.iconWidth
                          height: (src.height / src.width) * width
-                         visible: artistSong.isStreamingTrack
+                         visible: artistSong.isStreamingTrack || scMark !== ""

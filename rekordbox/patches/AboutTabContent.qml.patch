@@ -1,5 +1,5 @@
---- AboutTabContent.qml
-+++ AboutTabContent.qml
+--- a/Skins/Embedded/Views/ControlCenter/Tabs/Preferences/AboutTabContent.qml
++++ b/Skins/Embedded/Views/ControlCenter/Tabs/Preferences/AboutTabContent.qml
 @@ -3,6 +3,7 @@
  import "Entries"
  import "Entries/Base"

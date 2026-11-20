@@ -1,10 +1,10 @@
 {
   "id": "streaming-icons",
   "name": "Streaming Icons",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Jonathan Robichaud",
   "category": "ui",
-  "description": "Shows each track's real streaming service icon (Spotify, Deezer, NetEase, SoundCloud, Beatport, Apple Music, USB/SD) in the browser and on the decks, instead of the TIDAL icon EngineX's OmniSource tracks get. Each track's service comes from EngineX's gateway, so mixed lists (history, playlists, Prepare) show the right icon per track. Built for SC LIVE 4 on EngineX 5.3.0.4.",
+  "description": "Shows each track's real streaming service icon (Spotify, Deezer, NetEase, SoundCloud, Beatport, Apple Music, USB/SD) in the browser and on the decks, instead of the TIDAL icon EngineX's OmniSource tracks get. Each track's service comes from EngineX's gateway, so mixed lists (history, playlists, Prepare) show the right icon per track. Built for SC LIVE 4 on EngineX OS 5.3.0.5.",
   "qmlFiles": {
     "ProviderIcon.qml": "Skins/Embedded/Views/BrowseView/Components/Components/ProviderIcon.qml",
     "ArtistSong.qml": "Skins/Embedded/Views/MainView/ArtistSong.qml",

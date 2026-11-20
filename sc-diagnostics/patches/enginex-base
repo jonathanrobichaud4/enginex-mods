@@ -1,1 +1,3 @@
+# Files whose patch is against EngineX's UI pack (build.sh's 2nd argument), not stock Engine QML.
+AboutTabContent.qml
 StartProductionTestApplication.qml

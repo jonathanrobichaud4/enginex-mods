@@ -53,3 +53,8 @@ Engine only finds QML files it already has, so a new settings entry can't simply
 - rblive4 (MIT): `usb-watch.sh`, the shim sources and the player patch tables in `pc/rblive4/` are from it, pinned at commit `6003702`. See `pc/rblive4/LICENSE`.
 - DirectFB (LGPL-2.1): `lib/dfb/` is built from DirectFB 1.4.16 (github.com/deniskropp/DirectFB, commit `3637392`) with rblive4's `tools/build-directfb/directfb-full.diff`; `src/build.sh` rebuilds it.
 - This mod is not affiliated with Pioneer DJ, AlphaTheta, Denon DJ or inMusic.
+
+## 1.1.0: EngineX 5.3.0.5
+
+The About tab (shared with Hardware Diagnostics) is rebased on EngineX 5.3.0.5, so its new
+"Scan to open the console" QR code stays under the two entries.

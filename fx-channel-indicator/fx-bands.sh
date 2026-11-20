@@ -22,11 +22,18 @@
 ACTION="${1:-start}"
 DIR="${ENGINEX_MOD_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 LIB="$DIR/lib/libfxbands.so"
-# Which scheme this EngineX uses: 5.3.0.5's launcher preloads ENGINEX_UI_HOOK.
-if grep -qs 'ENGINEX_UI_HOOK' ${FXBANDS_GUARDS:-/etc/enginex/engine-ui-guard /etc/sc5000/engine-ui-guard}; then
+# Engine's own unit says which: EngineX sets the variable there (Environment=ENGINEX_UI_HOOK=... on
+# 5.3.0.5, from the data bundle on an SC LIVE 4). Failing that, which one its launcher reads.
+unit_vars=$(systemctl show engine.service -p Environment 2>/dev/null)
+case "$unit_vars" in
+    *ENGINEX_UI_HOOK=*) new_scheme=1 ;;
+    *SC5000_UI_HOOK=*) new_scheme=0 ;;
+    *) grep -qs 'ENGINEX_UI_HOOK' ${FXBANDS_GUARDS:-/data/enginex/bundle/bin/engine-ui-guard /etc/enginex/engine-ui-guard /etc/sc5000/engine-ui-guard} && new_scheme=1 || new_scheme=0 ;;
+esac
+if [ "$new_scheme" = 1 ]; then
     VAR=ENGINEX_UI_HOOK
     DEFAULT_ENV=/data/enginex/ui-scale.env
-    HOOKS="/etc/enginex/libengine-ui-hook.so /data/enginex/bundle/lib/libengine-ui-hook.so"
+    HOOKS="/data/enginex/bundle/lib/libengine-ui-hook.so /etc/enginex/libengine-ui-hook.so"
 else
     VAR=SC5000_UI_HOOK
     DEFAULT_ENV=/data/sc5000-custom/ui-scale.env
@@ -43,7 +50,7 @@ log() { echo "$(date '+%F %T') $*" >>"$LOG"; logger -t fx-bands "$*" 2>/dev/null
 
 # EngineX's own hook (what Engine preloads when the line isn't there).
 default_hook() {
-    h=$(systemctl show engine.service -p Environment 2>/dev/null | tr ' ' '\n' | sed -n "s/^$VAR=//p" | head -n 1)
+    h=$(echo "$unit_vars" | sed 's/^Environment=//' | tr ' ' '\n' | tr -d '"' | sed -n "s/^$VAR=//p" | head -n 1)
     [ -n "$h" ] && { echo "$h"; return; }
     for h in $HOOKS; do
         [ -f "$h" ] && { echo "$h"; return; }

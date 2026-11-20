@@ -1,5 +1,5 @@
---- StartProductionTestApplication.qml
-+++ StartProductionTestApplication.qml
+--- a/Skins/Embedded/Views/ControlCenter/Tabs/Preferences/Advanced/Entries/StartProductionTestApplication.qml
++++ b/Skins/Embedded/Views/ControlCenter/Tabs/Preferences/Advanced/Entries/StartProductionTestApplication.qml
 @@ -2,11 +2,18 @@
  import Planck 1.0
  import "../../Entries/Base"
