@@ -1,4 +1,4 @@
-# FX Channel Indicator 1.10.0
+# FX Channel Indicator 2.3.2
 
 Three additions to the SC LIVE 4 FX bar:
 
@@ -159,8 +159,10 @@ through `/tmp/enginex-fxbands` and is kept in the mod's settings file. The knob 
 nudges the frequency one step to say which way the knob turned; the FX bar reads that,
 picks the next combination and puts the frequency back at the centre.
 
-**Loading.** `fx-bands.sh` adds the library to the `SC5000_UI_HOOK` line in
-`/data/sc5000-custom/ui-scale.env` (`<hook>:<mod>/lib/libfxbands.so`), puts it back if
+**Loading.** `fx-bands.sh` adds the library to the UI hook line Engine preloads from
+(`<hook>:<mod>/lib/libfxbands.so`): `ENGINEX_UI_HOOK` in `/data/enginex/ui-scale.env` on
+EngineX 5.3.0.5 and later, `SC5000_UI_HOOK` in `/data/sc5000-custom/ui-scale.env` before
+(2.3.2 reads which from Engine's launcher and unit), puts it back if
 EngineX rewrites the file, and restarts Engine once if it is running without it (first
 enable). On stop it takes the library off the line. USB Audio Out 0.6.3 or later keeps
 the library on that line too; older versions overwrite it.
@@ -185,3 +187,14 @@ on. With none selected the effect isn't heard (it keeps running, so its tail com
 with the first band). The knob order starts at none:
 
     none, LOW, LOW + MID, MID, MID + HIGH, HIGH, LOW + HIGH, ALL
+
+## 2.3.2: EngineX 5.3.0.5
+
+EngineX 5.3.0.5 renamed the variable Engine preloads from (`ENGINEX_UI_HOOK`), moved the
+file it's read from (`/data/enginex/ui-scale.env`) and moved its hook
+(`/etc/enginex/libengine-ui-hook.so`). 2.3.1 still wrote the old line to the old file, so
+on 5.3.0.5 the band library never loaded and the bar fell back to 2.2.0's combinations: no
+LOW + HIGH, no MID alone, no "none". 2.3.2 works out which scheme the installed EngineX uses
+(from Engine's launcher and its unit) and writes that; 5.3.0.4 is handled as before.
+`sh fx-bands.sh status` shows the file and variable it uses and whether Engine has the
+library.

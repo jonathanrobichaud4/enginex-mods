@@ -1,7 +1,7 @@
 {
   "id": "fx-channel-indicator",
   "name": "FX Channel Indicator",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "author": "Jonathan Robichaud",
   "category": "ui",
   "description": "Shows which mixer channel the FX unit is on (CH 1-4 or MASTER) next to the effect name, blinks that channel's headphone CUE LED, and adds an optional band mode for the FX frequency control (Settings > Fx > FX Frequency): tap LOW / MID / HIGH in any combination (LOW + HIGH, MID alone, or none at all), or step through them with the FX knob; the selected bands light green while the FX is on. The effect is kept to the chosen bands by a small library the mod loads into Engine (Engine restarts once when the mod is first enabled). On EngineX 5.3.0.4 it also adds Reverse Left / Right Jog Wheel (Settings > Fx), using EngineX 5.3.0.5's own jog code; on 5.3.0.5 EngineX's built-in switches are used instead. Built for SC LIVE 4.",
